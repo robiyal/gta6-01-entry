@@ -132,6 +132,29 @@ export function createTraffic(scene, colliders) {
       ped.pos.x += Math.sin(ped.heading) * speed * dt;
       ped.pos.z += Math.cos(ped.heading) * speed * dt;
       collideCircle(colliders, ped.pos, 0.5);
+      // Keep pedestrians on the sidewalks: if one wanders onto the asphalt
+      // (and is not fleeing), steer it back to the nearest sidewalk edge
+      // instead of letting it jaywalk down the middle of a road.
+      if (ped.flee <= 0) {
+        const lx = nearestRoad(ped.pos.x);
+        const lz = nearestRoad(ped.pos.z);
+        const dxR = ped.pos.x - lx, dzR = ped.pos.z - lz;
+        const onX = Math.abs(dxR) < CITY.roadHalf + 1.2;
+        const onZ = Math.abs(dzR) < CITY.roadHalf + 1.2;
+        if (onX || onZ) {
+          let tx = ped.pos.x, tz = ped.pos.z;
+          if (onX && (!onZ || Math.abs(dxR) <= Math.abs(dzR))) {
+            tx = lx + (dxR >= 0 ? 1 : -1) * (CITY.roadHalf + 2.5);
+          } else {
+            tz = lz + (dzR >= 0 ? 1 : -1) * (CITY.roadHalf + 2.5);
+          }
+          const want = Math.atan2(tx - ped.pos.x, tz - ped.pos.z);
+          let dh = want - ped.heading;
+          while (dh > Math.PI) dh -= Math.PI * 2;
+          while (dh < -Math.PI) dh += Math.PI * 2;
+          ped.heading += Math.max(-1, Math.min(1, dh * 2)) * dt * 2;
+        }
+      }
       // Keep pedestrians inside the town and near sidewalks.
       if (Math.abs(ped.pos.x) > CITY.half - 8 || Math.abs(ped.pos.z) > CITY.half - 8) {
         ped.heading += Math.PI;

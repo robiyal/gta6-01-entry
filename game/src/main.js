@@ -70,6 +70,7 @@ const game = {
   jobMarker: null, // {x, z} when a job is waiting at the motel board
   missionNotice: '',
   speedKmh: 0,
+  shotFreeze: false, // ?shot=action only: hold the staged chase exactly
 };
 
 const jobBeacon = (() => {
@@ -260,6 +261,11 @@ function updatePlaying(dt) {
     const before = p.car.speed;
     updateCar(p.car, { throttle: fwd, steer, brake }, dt, colliders);
     syncCarMesh(p.carMesh, p.car);
+    // The player IS the car while driving: missions, police, traffic and
+    // the minimap all read p.pos, so it must track the car — without this
+    // the sheriff chases the spot you got in and a job can never complete
+    // by driving.
+    p.pos.copy(p.car.pos);
     game.speedKmh = Math.abs(p.car.speed) * 3.6;
     // Crash feedback on a hard stop.
     if (before > 10 && p.car.speed === 0) { audio.crash(); rig.addShake(0.4); }
@@ -420,24 +426,45 @@ function applyShotMode(shot) {
     rig.mode = 'chase';
     setState('playing');
   } else if (shot === 'action') {
-    missions.startMission(0);
-    missions.state.phase = 'deliver';
-    missions.state.timeLeft = 96;
-    police.setWanted(3);
-    // Cruisers spawn at the Sheriff's Office; pull two of them into the
-    // frame — one up ahead on the flank, one closing in from behind.
-    police.cruisers.forEach((c, i) => {
-      if (i === 0) { c.state.pos.set(7, 0, -38); c.state.heading = Math.PI; }
-      else { c.state.pos.set(-7, 0, -92); c.state.heading = 0; }
-      c.state.speed = 24;
-      syncCarMesh(c.mesh, c.state);
-    });
+    // Frozen chase formation: the sim does NOT run for this shot (see the
+    // loop's shotFreeze branch), so the frame is exactly as staged — the
+    // lead cruiser large ahead-right, a second unit blocking ahead-left,
+    // and a dense dust storm. Round 1 staged the cruisers with
+    // police.cruisers.forEach before any cruiser existed, so the call was
+    // a no-op and the units spawned at the Sheriff's Office, far away;
+    // this version spawns them first with a zero-dt update (spawn logic
+    // runs, nothing moves), then places them. The storm is held at 0.8:
+    // round 1 set 0.45, but M1 has no storm flag, so the loop decayed it
+    // to ~0.1 before the capture and the storm barely read.
+    player.state.pos.set(0, 0, -60);
+    player.state.heading = 0;
     player.enterCar(ownCar.state, ownCar.mesh);
     ownCar.state.pos.set(0, 0, -60);
     ownCar.state.heading = 0;
-    ownCar.state.speed = 26;
-    world.storm = 0.45;
-    rig.mode = 'chase';
+    ownCar.state.speed = 0;
+    syncCarMesh(ownCar.mesh, ownCar.state);
+    player.state.pos.copy(ownCar.state.pos);
+    missions.startMission(0);
+    missions.state.phase = 'deliver';
+    missions.state.timeLeft = 95;
+    missions.state.active.storm = true;
+    missions.beacon.position.set(-60, 0, -60);
+    police.setWanted(3);
+    police.update(0, { pos: player.state.pos, speed: 0, inCar: true, carState: null }, 0);
+    police.cruisers.forEach((c, i) => {
+      if (i === 0) { c.state.pos.set(3.4, 0, -57); c.state.heading = 0; }
+      else { c.state.pos.set(-2.6, 0, -44); c.state.heading = 0; }
+      c.state.speed = 0;
+      syncCarMesh(c.mesh, c.state);
+      // Frozen mid-flash light bar: red hot, blue dim.
+      if (c.mesh.userData.lightRed) {
+        c.mesh.userData.lightRed.material.emissiveIntensity = 3;
+        c.mesh.userData.lightBlue.material.emissiveIntensity = 0.2;
+      }
+    });
+    world.storm = 0.8;
+    game.shotFreeze = true;
+    rig.mode = 'action';
     setState('playing');
   } else if (shot === 'end') {
     const m = MISSION_DEFS[0];
@@ -450,8 +477,8 @@ function applyShotMode(shot) {
     speedKmh: shot === 'play' ? 50 : shot === 'action' ? 94 : 0,
     inCar: shot !== 'end',
     objectiveTitle: shot === 'action' ? 'First Job — deliver' : 'Find work',
-    objectiveText: shot === 'action' ? 'Get to the Rusty Spur Motel (86m). Lose the law if you have to.' : 'Head to the Rusty Spur Motel job board.',
-    timeLeft: shot === 'action' ? 96 : null,
+    objectiveText: shot === 'action' ? 'Get to the Rusty Spur Motel (60m). Lose the law if you have to.' : 'Head to the Rusty Spur Motel job board.',
+    timeLeft: shot === 'action' ? 95 : null,
     showCrosshair: false,
     hint: '',
   });
@@ -506,7 +533,22 @@ renderer.setAnimationLoop(() => {
     fpsFrames = 0;
     fpsWall = now;
   }
-  if (game.mode === 'playing') {
+  if (game.mode === 'playing' && game.shotFreeze) {
+    // Frozen action-shot staging (see applyShotMode): hold the chase
+    // formation exactly as staged — no simulation, no police AI, no mission
+    // timer — while the dust, the camera and the minimap stay live, so the
+    // captured frame is exact.
+    rig.mode = 'action';
+    const car = player.state.car;
+    rig.update(dt, { x: car.pos.x, z: car.pos.z, heading: car.heading }, 0, game.time);
+    world.update(dt, car.pos, game.time);
+    minimap.draw({
+      player: { x: player.state.pos.x, z: player.state.pos.z, heading: car.heading },
+      cars: traffic.cars.map((c) => ({ x: c.state.pos.x, z: c.state.pos.z })),
+      police: police.cruisers.map((c) => ({ x: c.state.pos.x, z: c.state.pos.z })),
+      target: missions.targetPos() || game.jobMarker,
+    });
+  } else if (game.mode === 'playing') {
     acc += dt;
     const step = 1 / 60;
     let n = 0;
@@ -535,6 +577,7 @@ Object.assign(window, {
     get cash() { return game.cash; },
     get wanted() { return police.getWanted(); },
     get health() { return game.health; },
+    get pos() { return { x: player.state.pos.x, z: player.state.pos.z }; },
     get mission() { return missions.state.active ? missions.state.active.id : null; },
     get drawCalls() { return renderer.info.render.calls; },
     get triangles() { return renderer.info.render.triangles; },

@@ -15,11 +15,30 @@ export function createCameraRig(camera) {
     fov: 62,
     update(dt, focus, speed01, time) {
       if (rig.mode === 'title') {
-        // Cinematic street dolly: slow push down the avenue toward the
-        // motel sign, hero car parked in frame — never through buildings.
+        // Cinematic crane dolly: a slow push west along the open z=-52
+        // corridor between the motel main building (north) and its wing
+        // (south) toward the RUSTY SPUR sign and the hero car. The car sits
+        // in a walled courtyard — every southern view is blocked by the
+        // wing below 30m, and the sign (now angled 45° to face south-east)
+        // is the one landmark that reads from the east. The camera rides
+        // HIGH (21m, above every nearby roof) so the flanking buildings
+        // read as rooftops, not walls, and the view axis is swung north so
+        // the sign + car land in the clear left third (clear of the
+        // centred title/button block), with the town + mesas in the centre.
+        // Sightline verified against the deterministic city layout.
         const t = (time * 0.03) % 1;
-        camera.position.set(-56 + Math.sin(time * 0.05) * 5, 8.5 + Math.sin(time * 0.11) * 0.8, -18 - t * 22);
-        camera.lookAt(-60, 7, -52);
+        camera.position.set(-20 - t * 12, 21 - t * 2, -52);
+        camera.lookAt(-57, 5, -72);
+      } else if (rig.mode === 'action') {
+        // Close, low chase camera for the frozen action shot: the lead
+        // cruiser looms large ahead-right, the player car fills the bottom
+        // centre. Set directly (no lerp) — the scene is frozen, so the
+        // frame is exact from the first frame.
+        const back = 9, up = 3.6;
+        const tx = focus.x - Math.sin(focus.heading) * back;
+        const tz = focus.z - Math.cos(focus.heading) * back;
+        camera.position.set(tx, up, tz);
+        camera.lookAt(focus.x + Math.sin(focus.heading) * 12, 1.4, focus.z + Math.cos(focus.heading) * 12);
       } else if (rig.mode === 'chase') {
         const back = 13 + speed01 * 5;
         const up = 5 + speed01 * 1.2;

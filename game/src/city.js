@@ -166,6 +166,12 @@ export function createCity(scene) {
   blockBuilding(-60, -60, 34, 12, 8, { color: 0xb97a4e }, 'motel-main');
   blockBuilding(-60, -44, 12, 12, 8, { color: 0xa86f45 }, 'motel-wing');
   const motelSign = makeSign('RUSTY SPUR', '#ff5da2', '#241a20', 14, 3.5);
+  // Angled 45° to face south-east, toward the corner where the x=-60 road
+  // meets the z=-60 road — a real motel sign on a corner reads from both
+  // approaches. (Face-on south, it was edge-on and invisible from the
+  // east, which is the one clear sightline to the hero car parked beside
+  // the motel; the wing blocks every southern view of the car below 30m.)
+  motelSign.rotation.y = Math.PI / 4;
   motelSign.position.set(-60, 12, -52);
   group.add(motelSign);
   const signPole = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 9, 8), hero({ color: 0x3a3a40, metalness: 0.6, roughness: 0.4 }));
