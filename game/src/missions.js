@@ -78,7 +78,13 @@ export function createMissions(scene) {
     beacon.userData.ring.rotation.z += dt * 0.6;
     // Steal missions complete their pickup by taking the car, not by arriving.
     if (state.active.stealCar && state.phase === 'pickup') return null;
-    if (d < 6) {
+    // Arrival radius 12m: mission targets are landmark CENTRES, and the
+    // landmarks are solid buildings — the closest a car can get to the
+    // Garage centre is 11.3m (9m half-depth + 2.3m radius), 10.3m at the
+    // Diner, 9.3m at the Gas & Go, 8.3m at the Motel. With radius 6 no
+    // mission could ever complete in live play (measured 2026-11-20).
+    // 12m means "pulled up at the place", not "inside the walls".
+    if (d < 12) {
       if (state.phase === 'pickup') {
         state.phase = 'deliver';
         return { type: 'picked-up', mission: state.active };

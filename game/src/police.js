@@ -4,7 +4,7 @@
 // close; escape decays the heat when no cruiser is near. On foot, deputies
 // chase and punch. Sirens wail while any cruiser is in pursuit.
 import * as THREE from 'three';
-import { LANDMARKS, TUNING } from './config.js';
+import { CITY, TUNING } from './config.js';
 import { makeCar, makeCarState, updateCar, syncCarMesh, pushCars } from './vehicles.js';
 
 export function createPolice(scene, colliders, audio) {
@@ -15,12 +15,87 @@ export function createPolice(scene, colliders, audio) {
   let bustTimer = 0;
   let sirenOn = false;
 
+  // ---- Road-graph pursuit (round 3) ----
+  // Cruisers steer ALONG ROADS toward the player (BFS over the 7x7 grid
+  // of intersections) instead of beelining through buildings. Beelining
+  // wedged the cruiser against a generic building at (106,-92) — measured
+  // 0.1 m/s for 4.5 sim-s after the spawn fix, even though the spawn
+  // itself was clear. Landmarks straddle intersections (the Sheriff's
+  // Office sits on (120,-120), the Motel on (-60,-60)), so nodes and
+  // edges touching a landmark collider are impassable and the route goes
+  // around them. Generic buildings never block a road: their faces sit
+  // >=6m from a road centreline, past the 2.8m clearance margin.
+  const GRID = CITY.grid; // [-180,-120,-60,0,60,120,180], pitch 60
+  const CLEAR = 2.8; // node/edge clearance past the 2.3m car radius
+  function nodeBlocked(x, z) {
+    for (const b of colliders) {
+      if (x >= b.x0 - CLEAR && x <= b.x1 + CLEAR && z >= b.z0 - CLEAR && z <= b.z1 + CLEAR) return true;
+    }
+    return false;
+  }
+  function edgeBlocked(ax, az, bx, bz) {
+    for (const b of colliders) {
+      if (ax === bx) { // vertical segment, x = ax
+        if (ax < b.x0 - CLEAR || ax > b.x1 + CLEAR) continue;
+        const lo = Math.min(az, bz), hi = Math.max(az, bz);
+        if (b.z1 + CLEAR >= lo && b.z0 - CLEAR <= hi) return true;
+      } else { // horizontal segment, z = az
+        if (az < b.z0 - CLEAR || az > b.z1 + CLEAR) continue;
+        const lo = Math.min(ax, bx), hi = Math.max(ax, bx);
+        if (b.x1 + CLEAR >= lo && b.x0 - CLEAR <= hi) return true;
+      }
+    }
+    return false;
+  }
+  // Nearest UNBLOCKED intersection (Manhattan) to a point.
+  function nearestOpenNode(x, z) {
+    let best = null, bestD = Infinity;
+    for (const gx of GRID) for (const gz of GRID) {
+      if (nodeBlocked(gx, gz)) continue;
+      const d = Math.abs(gx - x) + Math.abs(gz - z);
+      if (d < bestD) { bestD = d; best = [gx, gz]; }
+    }
+    return best;
+  }
+  // BFS over intersections; returns [node, node, ...] from start to goal,
+  // or null when unreachable.
+  function findRoute(sx, sz, tx, tz) {
+    const key = (x, z) => `${x},${z}`;
+    if (sx === tx && sz === tz) return [[tx, tz]];
+    const prev = new Map([[key(sx, sz), null]]);
+    const queue = [[sx, sz]];
+    while (queue.length) {
+      const [cx, cz] = queue.shift();
+      for (const [dx, dz] of [[60, 0], [-60, 0], [0, 60], [0, -60]]) {
+        const nx = cx + dx, nz = cz + dz;
+        if (nx < -180 || nx > 180 || nz < -180 || nz > 180) continue;
+        const k = key(nx, nz);
+        if (prev.has(k) || nodeBlocked(nx, nz) || edgeBlocked(cx, cz, nx, nz)) continue;
+        prev.set(k, [cx, cz]);
+        if (nx === tx && nz === tz) {
+          const path = [[nx, nz]];
+          let cur = [cx, cz];
+          while (cur) { path.unshift(cur); cur = prev.get(key(cur[0], cur[1])); }
+          return path;
+        }
+        queue.push([nx, nz]);
+      }
+    }
+    return null;
+  }
+
   function spawnCruiser() {
-    const s = LANDMARKS.sheriff;
+    // Spawn on the x=120 road 13m south of the Sheriff's Office, heading
+    // into town (+z) — NOT at the office door. The old spot (office +
+    // (10,8) = (130,-112)) sat INSIDE a generic building (x[128..151]
+    // z[-113..-86]) and 1m from the office corner, so the cruiser ground
+    // against both colliders and never moved (measured 3m in 5.8 sim-s).
+    // (120,-100) is verified clear against the live collider set:
+    // nearest collider 8.40m away (6.10m past the 2.3m radius), on road.
     const mesh = makeCar(0x1c1c22, { police: true, name: `police-${cruisers.length}` });
     scene.add(mesh);
-    const state = makeCarState(s.x + 10, s.z + 8, Math.PI / 2);
-    cruisers.push({ mesh, state, mode: 'chase', stuck: 0 });
+    const state = makeCarState(120, -100, 0);
+    cruisers.push({ mesh, state, mode: 'chase', stuck: 0, route: null, routeIdx: 0, replanAt: 0, reverseUntil: 0, goalNode: null });
   }
 
   function spawnDeputy(x, z) {
@@ -78,16 +153,86 @@ export function createPolice(scene, colliders, audio) {
       const dz = player.pos.z - c.state.pos.z;
       const dist = Math.hypot(dx, dz);
       nearestDist = Math.min(nearestDist, dist);
-      // Pursuit steering: aim at the player, with a little weave so the
-      // chase reads as a chase, not a magnet.
-      const wantHeading = Math.atan2(dx, dz) + Math.sin(time * 0.7 + c.state.pos.x) * 0.08;
+      // Aim: the player directly when close (final ram/bust) or when no
+      // route exists; otherwise the next node of the BFS road route.
+      let aimX = player.pos.x, aimZ = player.pos.z, direct = true;
+      if (dist >= 25) {
+        if (!c.route || time >= c.replanAt) {
+          c.replanAt = time + 1;
+          const goal = nearestOpenNode(player.pos.x, player.pos.z);
+          const goalChanged = !c.goalNode || !goal || goal[0] !== c.goalNode[0] || goal[1] !== c.goalNode[1];
+          if (!c.route || goalChanged) {
+            c.goalNode = goal;
+            // Route FROM the node the cruiser is already heading to — NOT
+            // from the nearest node. Replanning every second from the
+            // nearest node reset the route to (120,0) while the cruiser
+            // was already 20m west of it, so it U-turned back every
+            // second and oscillated around the intersection for 30 sim-s
+            // (measured: stuck between (94,9) and (120,0), never past).
+            const from = (c.route && c.routeIdx < c.route.length)
+              ? c.route[c.routeIdx]
+              : nearestOpenNode(c.state.pos.x, c.state.pos.z);
+            c.route = (from && goal) ? findRoute(from[0], from[1], goal[0], goal[1]) : null;
+            c.routeIdx = 0;
+          }
+        }
+        if (c.route) {
+          while (c.routeIdx < c.route.length) {
+            const [nx, nz] = c.route[c.routeIdx];
+            if (Math.hypot(nx - c.state.pos.x, nz - c.state.pos.z) < 8) c.routeIdx++;
+            else break;
+          }
+          if (c.routeIdx < c.route.length) {
+            [aimX, aimZ] = c.route[c.routeIdx];
+            direct = false;
+          } else {
+            c.route = null; // route done — rebuild if the player moves on
+          }
+        }
+      }
+      // Pursuit steering: aim at the target, with a little weave on the
+      // direct chase so it reads as a chase, not a magnet. No weave on
+      // route legs — a +/-0.08 rad wobble over 60m would push the car off
+      // the 8m road into roadside buildings.
+      const weave = direct ? Math.sin(time * 0.7 + c.state.pos.x) * 0.08 : 0;
+      const wantHeading = Math.atan2(aimX - c.state.pos.x, aimZ - c.state.pos.z) + weave;
       let dh = wantHeading - c.state.heading;
       while (dh > Math.PI) dh -= Math.PI * 2;
       while (dh < -Math.PI) dh += Math.PI * 2;
       const steer = Math.max(-1, Math.min(1, dh * 1.4));
-      const targetSpeed = Math.min(38, Math.abs(player.speed || 0) + 9);
-      const throttle = c.state.speed < targetSpeed ? 1 : 0.2;
-      updateCar(c.state, { throttle, steer, brake: false }, dt, colliders);
+      const targetSpeed = Math.min(38, Math.max(18, Math.abs(player.speed || 0) + 9));
+      // Minimum pursuit speed 18 m/s (was playerSpeed+9, i.e. 9 for a
+      // parked player — a 400m office detour then took ~50s, longer than
+      // the wanted decay, so the star cleared before the police arrived).
+      // A fleeing player still sets the pace (playerSpeed+9 above 18).
+      // Slow down for turns: the turn rate scales down with speed, so at
+      // 17+ m/s the car cannot make a 90-degree intersection turn — it
+      // overshoots 10-40m into the blocks (measured: the cruiser blew
+      // past (120,0) to (134,-19.8) and past (0,0) to (-34,-12), grinding
+      // on a generic building each time). Cap speed by heading error, the
+      // same way the clip pilot drives the player car — and BRAKE to reach
+      // the cap: cutting throttle to 0.2 only coasts (drag ~2.5 m/s^2 vs
+      // 2.8 accel), so the car never slowed for the turn.
+      const turnCap = Math.abs(dh) > 0.4 ? 6 : Math.abs(dh) > 0.15 ? 12 : 38;
+      let target = Math.min(targetSpeed, turnCap);
+      // Final approach: ease onto the player instead of blowing past at
+      // 18 m/s — a bust needs the cruiser to SIT within 5m for 2s. Gentle
+      // (2 m/s at contact) so the ram push stays well under bustSpeed 2.5.
+      if (direct) target = Math.min(target, Math.max(2, dist * 0.4));
+      let throttle = c.state.speed < target ? 1 : 0;
+      let brake = c.state.speed > target + 2;
+      // Stuck: grinding a wall while trying to move — reverse off it for
+      // 0.8s, then replan from the new spot.
+      if (throttle === 1 && Math.abs(c.state.speed) < 1) c.stuck += dt;
+      else c.stuck = 0;
+      if (c.stuck > 1.5) {
+        c.stuck = 0;
+        c.reverseUntil = time + 0.8;
+        c.route = null;
+        c.replanAt = time + 0.8;
+      }
+      if (time < c.reverseUntil) { throttle = -1; brake = false; }
+      updateCar(c.state, { throttle, steer: time < c.reverseUntil ? 0 : steer, brake }, dt, colliders);
       // Ram: shove the player's car on contact.
       if (player.carState && dist < c.state.radius + player.carState.radius) {
         pushCars(c.state, player.carState);

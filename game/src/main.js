@@ -258,7 +258,7 @@ function damagePlayer(amount, cause) {
 
 function updatePlaying(dt) {
   const p = player.state;
-  const inCar = p.inCar;
+  let inCar = p.inCar;
 
   // --- Input: drive or walk.
   if (inCar) {
@@ -314,6 +314,10 @@ function updatePlaying(dt) {
       tryEnterCar();
     }
   }
+  // Re-read: E may have entered/exited the car this frame, and the
+  // stale `inCar` would read p.car after exitCar() nulled it
+  // (TypeError at the playerSpeed line below — fired on every exit).
+  inCar = p.inCar;
 
   // --- Traffic + pedestrians.
   const playerSpeed = inCar ? p.car.speed : p.speed;

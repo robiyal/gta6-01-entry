@@ -79,8 +79,15 @@ export const TUNING = {
   trafficCount: 9,
   pedCount: 14,
   policeMax: 3,
-  wantedDecaySeconds: 12,  // no police near -> -1 star
-  bustRadius: 3.0,
+  wantedDecaySeconds: 30,  // no police near -> -1 star; 30s (was 12) so a
+  // cruiser has time to route around the Sheriff's Office detour (~400m)
+  // before the star self-clears — at 12s M1's wanted vanished before the
+  // police could ever arrive, making wanted self-clearing.
+  bustRadius: 5.0,  // cruiser within 5m of a slow player for 2s -> busted.
+  // Was 3.0, but two cars in contact sit 4.6m apart centre-to-centre
+  // (radius 2.3 each), so a cruiser pushing the player's bumper could
+  // never trigger it — measured: dist pinned at 4.6m for 29 sim-s with
+  // no bust. 5.0 means "sitting on the player's bumper" counts.
   bustSpeed: 2.5,
   bustHold: 2.0,
   punchRange: 2.2,
