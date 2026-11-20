@@ -43,11 +43,17 @@ const ui = createUI({
 });
 
 // ---- The player's own car + the gold coupe for mission 3.
+// The hero car sits three-quarter to the east corridor (facing north-east),
+// so the title dolly — which rides that corridor — sees its long side,
+// not just its narrow nose: it reads as a car, ~2.5x wider on screen than
+// the old east-facing park. (Round 3: the car was ~40px and read as a red
+// blob near the controls line.) Driving is unaffected: the state heading
+// matches the mesh, and the player steers wherever they like.
 const ownCarMesh = makeCar(0xc94f3d, { name: 'rook-car' });
 ownCarMesh.position.set(-52, 0, -52);
-ownCarMesh.rotation.y = Math.PI / 2;
+ownCarMesh.rotation.y = Math.PI / 4;
 scene.add(ownCarMesh);
-const ownCar = { mesh: ownCarMesh, state: makeCarState(-52, -52, Math.PI / 2), owned: true };
+const ownCar = { mesh: ownCarMesh, state: makeCarState(-52, -52, Math.PI / 4), owned: true };
 
 const goldMesh = makeCar(0xe8b13c, { name: 'gold-coupe' });
 goldMesh.position.set(-104, 0, -112);
@@ -409,6 +415,17 @@ function applyShotMode(shot) {
   if (shot === 'start') {
     ui.setTitle(null);
     setState('title');
+    // Round 3: stage the hero car 24m out in the open east corridor
+    // (-40,-52) instead of its boot spot (-52,-52) tucked in the
+    // motel's NE corner — from the new 10m title dolly the boot spot
+    // reads ~90px at the frame's left edge, while the staged spot
+    // reads ~125px lower-left, clear of the buttons/controls. The
+    // corridor is verified clear of generic buildings there. Shot-only
+    // staging: the live game still spawns the car at (-52,-52).
+    ownCar.state.pos.set(-40, 0, -52);
+    ownCar.state.heading = Math.PI / 4;
+    ownCar.state.speed = 0;
+    syncCarMesh(ownCar.mesh, ownCar.state);
     return;
   }
   // Play, action and end all skip the title.
@@ -471,6 +488,12 @@ function applyShotMode(shot) {
     ui.showComplete(m, m.reward, game.cash + m.reward);
     setState('complete');
     rig.mode = 'title';
+    // Same staged hero car as 'start' (see above) — the end screen
+    // rides the same title dolly, so the car reads in both frames.
+    ownCar.state.pos.set(-40, 0, -52);
+    ownCar.state.heading = Math.PI / 4;
+    ownCar.state.speed = 0;
+    syncCarMesh(ownCar.mesh, ownCar.state);
   }
   ui.updateHUD({
     health: 100, cash: game.cash, wanted: police.getWanted(),

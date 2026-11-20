@@ -171,11 +171,15 @@ export function createCity(scene) {
   // approaches. (Face-on south, it was edge-on and invisible from the
   // east, which is the one clear sightline to the hero car parked beside
   // the motel; the wing blocks every southern view of the car below 30m.)
+  // Moved 6m west (round 3): from the title dolly the sign's right end
+  // sat behind the "F" of the "First Job — COMPLETE" heading in shot 4
+  // (~90% readable); the shift puts the whole sign clear of the centred
+  // overlay text in both the title and complete framings.
   motelSign.rotation.y = Math.PI / 4;
-  motelSign.position.set(-60, 12, -52);
+  motelSign.position.set(-66, 12, -52);
   group.add(motelSign);
   const signPole = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 9, 8), hero({ color: 0x3a3a40, metalness: 0.6, roughness: 0.4 }));
-  signPole.position.set(-60, 4.5, -52);
+  signPole.position.set(-66, 4.5, -52);
   signPole.castShadow = true;
   group.add(signPole);
 

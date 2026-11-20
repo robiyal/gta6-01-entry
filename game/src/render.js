@@ -15,20 +15,26 @@ export function createCameraRig(camera) {
     fov: 62,
     update(dt, focus, speed01, time) {
       if (rig.mode === 'title') {
-        // Cinematic crane dolly: a slow push west along the open z=-52
-        // corridor between the motel main building (north) and its wing
-        // (south) toward the RUSTY SPUR sign and the hero car. The car sits
-        // in a walled courtyard — every southern view is blocked by the
-        // wing below 30m, and the sign (now angled 45° to face south-east)
-        // is the one landmark that reads from the east. The camera rides
-        // HIGH (21m, above every nearby roof) so the flanking buildings
-        // read as rooftops, not walls, and the view axis is swung north so
-        // the sign + car land in the clear left third (clear of the
-        // centred title/button block), with the town + mesas in the centre.
-        // Sightline verified against the deterministic city layout.
+        // Cinematic street-level dolly (round 3, iteration 3): the camera
+        // rides the east corridor at 10m — just above the 8m roofs, so
+        // the motel roof reads as a thin band instead of the slab the
+        // 15m/21m cranes produced (a high camera looks DOWN at the roof
+        // and its south facade, and the closer it is the bigger they
+        // loom; iteration 1 proved it, iteration 2's road dolly proved
+        // the car/sign are hidden behind the motel's SE corner from the
+        // road at any height below ~35m). The view pitches gently down
+        // toward the town (lookAt y -2, z -80): the RUSTY SPUR sign
+        // lands upper-left, clear of the centred title/heading; the
+        // hero car — staged at (-40,-52) in applyShotMode 'start'/'end',
+        // 24m out in the open corridor — lands lower-left, ~125px and
+        // clear of the buttons/controls; the town and mesas fill the
+        // upper frame and the corridor floor the bottom. The corridor
+        // east of the motel is verified clear (deterministic city: no
+        // generic building overlaps z -58..-46, x -48..-8), so the car
+        // spot and the whole dolly path are open air.
         const t = (time * 0.03) % 1;
-        camera.position.set(-20 - t * 12, 21 - t * 2, -52);
-        camera.lookAt(-57, 5, -72);
+        camera.position.set(-16 - t * 8, 10, -52);
+        camera.lookAt(-50, -2, -80);
       } else if (rig.mode === 'action') {
         // Close, low chase camera for the frozen action shot: the lead
         // cruiser looms large ahead-right, the player car fills the bottom
