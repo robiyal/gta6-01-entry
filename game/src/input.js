@@ -1,53 +1,72 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// Dusthaven input: keyboard state + mouse (drag to orbit the camera on foot,
+// click to shoot). Also exposes the shot-mode query (?shot=start|play|action|end)
+// the kit's shots.json uses for deterministic screenshots.
+export function createInput() {
+  const keys = new Set();
+  const pressed = new Set(); // edge-triggered: one entry per physical press
+  const state = {
+    keys,
+    mouseDown: false,
+    mouseClicked: false,
+    dragDX: 0, dragDY: 0,
+    pointerLocked: false,
+  };
+  let lastX = 0, lastY = 0;
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
-
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
-
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
-
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
+  window.addEventListener('keydown', (e) => {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (!e.repeat) pressed.add(e.code);
+    keys.add(e.code);
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
+  window.addEventListener('keyup', (e) => keys.delete(e.code));
+  window.addEventListener('blur', () => keys.clear());
+
+  const canvas = document.getElementById('game');
+  canvas.addEventListener('mousedown', (e) => {
+    state.mouseDown = true;
+    state.mouseClicked = true;
+    lastX = e.clientX; lastY = e.clientY;
   });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
-  });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
+  window.addEventListener('mouseup', () => { state.mouseDown = false; });
+  window.addEventListener('mousemove', (e) => {
+    if (!state.mouseDown) return;
+    state.dragDX += e.clientX - lastX;
+    state.dragDY += e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
   });
 
   return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
+    state,
+    down(code) { return keys.has(code); },
+    // Edge-triggered: true once per physical key press.
+    consumePressed(code) {
+      if (pressed.has(code)) { pressed.delete(code); return true; }
+      return false;
     },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
+    axis() {
+      // Driving / walking axes: W/S throttle, A/D steer.
+      const fwd = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0)
+        - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
+      const steer = (keys.has('KeyA') || keys.has('ArrowLeft') ? -1 : 0)
+        + (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0);
+      return { fwd, steer };
+    },
+    consumeClick() {
+      const c = state.mouseClicked;
+      state.mouseClicked = false;
+      return c;
+    },
+    consumeDrag() {
+      const d = { x: state.dragDX, y: state.dragDY };
+      state.dragDX = 0; state.dragDY = 0;
+      return d;
     },
   };
+}
+
+export function shotMode() {
+  const q = new URLSearchParams(window.location.search);
+  const s = q.get('shot');
+  return ['start', 'play', 'action', 'end'].includes(s) ? s : null;
 }

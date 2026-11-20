@@ -1,141 +1,136 @@
-// Drawing only: the world's state and the current screen in, pixels out. The 1280x720 playfield
-// is scaled to fit the window and centred, the margin filled with the backdrop colour. Flat
-// rectangles and circles, canvas text for the HUD and the panels. Text that holds a number is
-// rebuilt only when the number changes, so a frame allocates nothing.
-import { FIELD, FONT, LIVES, PALETTE } from './config.js';
-import { KIND_COIN } from './world.js';
+// Dusthaven cameras and minimap.
+// Chase cam behind the car (with speed FOV kick), third-person orbit on foot
+// (drag to look), and a slow title orbit around the hero car with three-point
+// lighting. The minimap is a 2D canvas: roads, the player arrow, police,
+// traffic and the mission beacon.
+import * as THREE from 'three';
+import { CITY, LANDMARKS } from './config.js';
 
-export const SCREEN_TITLE = 'title';
-export const SCREEN_PLAY = 'play';
-export const SCREEN_PAUSED = 'paused';
-export const SCREEN_OVER = 'over';
-
-/** The panel's width; its height grows with its lines: room for the title, the lines and the prompt. */
-const PANEL = { width: 600, top: 134, line: 34, bottom: 70 };
-const LIFE_SIZE = 20;
-const LIFE_GAP = 8;
-
-function cachedLabel(prefix) {
-  let value = -1;
-  let text = '';
-  return function label(next) {
-    if (next !== value) {
-      value = next;
-      text = prefix + next;
-    }
-    return text;
+export function createCameraRig(camera) {
+  const rig = {
+    mode: 'title', // title | chase | foot | top
+    yaw: 0, pitch: 0.32,
+    orbitAngle: 0,
+    shake: 0,
+    fov: 62,
+    update(dt, focus, speed01, time) {
+      if (rig.mode === 'title') {
+        // Cinematic street dolly: slow push down the avenue toward the
+        // motel sign, hero car parked in frame — never through buildings.
+        const t = (time * 0.03) % 1;
+        camera.position.set(-56 + Math.sin(time * 0.05) * 5, 8.5 + Math.sin(time * 0.11) * 0.8, -18 - t * 22);
+        camera.lookAt(-60, 7, -52);
+      } else if (rig.mode === 'chase') {
+        const back = 13 + speed01 * 5;
+        const up = 5 + speed01 * 1.2;
+        const tx = focus.x - Math.sin(focus.heading) * back;
+        const tz = focus.z - Math.cos(focus.heading) * back;
+        camera.position.x += (tx - camera.position.x) * Math.min(1, dt * 5);
+        camera.position.y += (up - camera.position.y) * Math.min(1, dt * 5);
+        camera.position.z += (tz - camera.position.z) * Math.min(1, dt * 5);
+        camera.lookAt(focus.x + Math.sin(focus.heading) * 8, 1.6, focus.z + Math.cos(focus.heading) * 8);
+      } else if (rig.mode === 'foot') {
+        const back = 7.5;
+        const up = 3.4;
+        const cx = focus.x - Math.sin(rig.yaw) * Math.cos(rig.pitch) * back;
+        const cz = focus.z - Math.cos(rig.yaw) * Math.cos(rig.pitch) * back;
+        camera.position.x += (cx - camera.position.x) * Math.min(1, dt * 8);
+        camera.position.y += (up + Math.sin(rig.pitch) * back - camera.position.y) * Math.min(1, dt * 8);
+        camera.position.z += (cz - camera.position.z) * Math.min(1, dt * 8);
+        camera.lookAt(focus.x, 1.6, focus.z);
+      }
+      // Speed kick + impact shake.
+      const targetFov = 62 + speed01 * 10;
+      rig.fov += (targetFov - rig.fov) * Math.min(1, dt * 4);
+      camera.fov = rig.fov;
+      camera.updateProjectionMatrix();
+      if (rig.shake > 0.001) {
+        camera.position.x += (Math.random() - 0.5) * rig.shake;
+        camera.position.y += (Math.random() - 0.5) * rig.shake;
+        rig.shake *= Math.pow(0.001, dt);
+      }
+    },
+    addShake(amount) { rig.shake = Math.min(0.9, rig.shake + amount); },
   };
+  return rig;
 }
 
-export function createRenderer(canvas) {
-  const context = canvas.getContext('2d');
-  const view = { scale: 1, x: 0, y: 0 };
-  const scoreLabel = cachedLabel('Score ');
-  const levelLabel = cachedLabel('Level ');
-  const finalLabel = cachedLabel('Score ');
-  const bestLabel = cachedLabel('Best ');
+export function createMinimap(canvas) {
+  const ctx = canvas.getContext('2d');
+  const S = canvas.width;
+  const scale = S / (CITY.half * 2 + 40);
+  const toMap = (x, z) => [(x + CITY.half + 20) * scale, (z + CITY.half + 20) * scale];
 
-  function resize() {
-    const ratio = window.devicePixelRatio || 1;
-    const width = Math.round(window.innerWidth * ratio);
-    const height = Math.round(window.innerHeight * ratio);
-    canvas.width = width;
-    canvas.height = height;
-    view.scale = Math.min(width / FIELD.width, height / FIELD.height);
-    view.x = (width - FIELD.width * view.scale) / 2;
-    view.y = (height - FIELD.height * view.scale) / 2;
-  }
-
-  const fonts = new Map();
-  function text(value, x, y, size, color, align) {
-    if (!fonts.has(size)) fonts.set(size, `${size}px ${FONT}`);
-    context.font = fonts.get(size);
-    context.fillStyle = color;
-    context.textAlign = align;
-    context.fillText(value, x, y);
-  }
-
-  function drawField(state) {
-    context.fillStyle = PALETTE.sky;
-    context.fillRect(0, 0, FIELD.width, FIELD.height);
-    context.fillStyle = PALETTE.ground;
-    context.fillRect(0, FIELD.groundY, FIELD.width, FIELD.height - FIELD.groundY);
-
-    const items = state.items;
-    for (let index = 0; index < items.length; index += 1) {
-      const item = items[index];
-      if (!item.active) continue;
-      if (item.kind === KIND_COIN) {
-        context.fillStyle = PALETTE.coin;
-        context.beginPath();
-        context.arc(item.x + item.width / 2, item.y + item.height / 2, item.width / 2, 0, Math.PI * 2);
-        context.fill();
-      } else {
-        context.fillStyle = PALETTE.block;
-        context.fillRect(item.x, item.y, item.width, item.height);
-      }
+  function draw(state) {
+    // state: {player:{x,z,heading}, cars:[{x,z}], police:[{x,z}], peds:[{x,z}], target:{x,z}|null, north}
+    ctx.clearRect(0, 0, S, S);
+    ctx.fillStyle = '#241a12';
+    ctx.fillRect(0, 0, S, S);
+    // Sand.
+    ctx.fillStyle = '#c99a5e';
+    ctx.fillRect(0, 0, S, S);
+    // Roads.
+    ctx.strokeStyle = '#3a3a40';
+    ctx.lineWidth = Math.max(2, 8 * scale);
+    ctx.lineCap = 'round';
+    for (const line of CITY.grid) {
+      const [x1, y1] = toMap(line, -CITY.half - 20);
+      const [x2, y2] = toMap(line, CITY.half + 20);
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      const [x3, y3] = toMap(-CITY.half - 20, line);
+      const [x4, y4] = toMap(CITY.half + 20, line);
+      ctx.beginPath(); ctx.moveTo(x3, y3); ctx.lineTo(x4, y4); ctx.stroke();
     }
-
-    const player = state.player;
-    // Blink while invulnerable after a hit: hidden on every other tenth of a second.
-    if (player.invulnerable === 0 || Math.floor(player.invulnerable * 10) % 2 === 1) {
-      context.fillStyle = PALETTE.player;
-      context.fillRect(player.x, player.y, player.width, player.height);
+    // Landmarks.
+    ctx.font = 'bold 9px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    for (const lm of Object.values(LANDMARKS)) {
+      const [x, y] = toMap(lm.x, lm.z);
+      ctx.fillStyle = '#7a5a30';
+      ctx.fillRect(x - 2, y - 2, 4, 4);
     }
+    // Mission beacon.
+    if (state.target) {
+      const [x, y] = toMap(state.target.x, state.target.z);
+      const pulse = 6 + Math.sin(performance.now() * 0.006) * 2;
+      ctx.fillStyle = '#ffc53d';
+      ctx.beginPath(); ctx.arc(x, y, pulse, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff2c8';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    // Traffic (white) and peds (pale).
+    ctx.fillStyle = '#f0ead8';
+    for (const c of state.cars || []) {
+      const [x, y] = toMap(c.x, c.z);
+      ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+    }
+    // Police (flashing red/blue).
+    const phase = Math.floor(performance.now() / 300) % 2 === 0;
+    ctx.fillStyle = phase ? '#ff3333' : '#3388ff';
+    for (const p of state.police || []) {
+      const [x, y] = toMap(p.x, p.z);
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    // Player arrow (heading).
+    const [px, py] = toMap(state.player.x, state.player.z);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(state.player.heading);
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#1c1c22';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -8); ctx.lineTo(5.5, 6); ctx.lineTo(0, 3); ctx.lineTo(-5.5, 6); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+    // North + border.
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = 'bold 10px system-ui, sans-serif';
+    ctx.fillText('N', S - 10, 12);
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, S - 2, S - 2);
   }
-
-  function drawHud(state) {
-    context.textBaseline = 'top';
-    text(scoreLabel(state.score), 24, 20, 28, PALETTE.text, 'left');
-    text(levelLabel(state.level), FIELD.width / 2, 20, 28, PALETTE.text, 'center');
-    const firstLife = FIELD.width - 24 - LIVES * (LIFE_SIZE + LIFE_GAP) + LIFE_GAP;
-    text('Lives', firstLife - 12, 20, 28, PALETTE.text, 'right');
-    for (let life = 0; life < LIVES; life += 1) {
-      context.fillStyle = life < state.lives ? PALETTE.player : PALETTE.ground;
-      context.fillRect(firstLife + life * (LIFE_SIZE + LIFE_GAP), 24, LIFE_SIZE, LIFE_SIZE);
-    }
-  }
-
-  function drawPanel(title, lines, prompt) {
-    const height = PANEL.top + lines.length * PANEL.line + PANEL.bottom;
-    const x = (FIELD.width - PANEL.width) / 2;
-    const y = (FIELD.height - height) / 2;
-    context.fillStyle = PALETTE.panel;
-    context.fillRect(x, y, PANEL.width, height);
-    context.textBaseline = 'alphabetic';
-    text(title, FIELD.width / 2, y + 78, 48, PALETTE.text, 'center');
-    for (let index = 0; index < lines.length; index += 1) {
-      text(lines[index], FIELD.width / 2, y + PANEL.top + index * PANEL.line, 22, PALETTE.muted, 'center');
-    }
-    text(prompt, FIELD.width / 2, y + height - 40, 24, PALETTE.coin, 'center');
-  }
-
-  const TITLE_LINES = ['Dodge the red blocks. Catch the gold coins.', 'Move with ← → or A D.  Pause with P.', ''];
-  const PAUSED_LINES = ['The blocks will wait for you.'];
-  const OVER_LINES = ['', ''];
-
-  /** Paint one frame: the field, then the HUD or a panel for the screen the game is on. */
-  function draw(state, screen, best) {
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.fillStyle = PALETTE.backdrop;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
-    drawField(state);
-    if (screen === SCREEN_TITLE) {
-      TITLE_LINES[2] = bestLabel(best);
-      drawPanel('Block Dodger', TITLE_LINES, 'Press Space or click to start');
-      return;
-    }
-    drawHud(state);
-    if (screen === SCREEN_PAUSED) drawPanel('Paused', PAUSED_LINES, 'Press P to resume');
-    else if (screen === SCREEN_OVER) {
-      OVER_LINES[0] = finalLabel(state.score);
-      OVER_LINES[1] = bestLabel(best);
-      drawPanel('Game over', OVER_LINES, 'Press Space or click to play again');
-    }
-  }
-
-  resize();
-  window.addEventListener('resize', resize);
   return { draw };
 }

@@ -1,124 +1,264 @@
-// The game's rules and state, with no drawing and no browser in it: the player's paddle, the
-// pool of falling blocks and coins, spawning, collisions, score, lives and level. step() advances
-// one fixed step and returns what happened as bit flags, so the caller can react without the
-// world knowing about screens or sound. Nothing here allocates after createWorld returns.
-import { BLOCK, COIN, FIELD, LEVEL, LIVES, PLAYER, POOL_SIZE } from './config.js';
+// Dusthaven world: renderer, sky, sun, fog, dust, ground and the desert ring.
+// PBR approach: one warm key sun + hemisphere fill + a faint cool bounce;
+// ACES tone mapping; PCFSoft shadows that follow the player.
+import * as THREE from 'three';
+import { CITY, PALETTE } from './config.js';
 
-export const KIND_BLOCK = 0;
-export const KIND_COIN = 1;
+function makeGroundTexture() {
+  // One 2048 canvas paints the whole playable city: sand, sidewalks, asphalt
+  // roads with dashed centre lines, crosswalks and dirt patches. The texture
+  // is the albedo map; roughness stays high and flat (sand + asphalt).
+  const S = 2048;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const g = c.getContext('2d');
+  const m = S / CITY.groundSize; // px per metre
+  const toPx = (v) => (v + CITY.groundSize / 2) * m;
 
-export const EVENT_HIT = 1;
-export const EVENT_COIN = 2;
-export const EVENT_OVER = 4;
-
-function overlaps(a, b) {
-  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+  // Sand base with speckle variation (roughness variation in the albedo).
+  g.fillStyle = '#d9a866';
+  g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 9000; i++) {
+    const x = Math.random() * S, y = Math.random() * S;
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(185,138,78,0.25)' : 'rgba(240,200,140,0.22)';
+    g.fillRect(x, y, 2 + Math.random() * 5, 2 + Math.random() * 5);
+  }
+  // Dirt patches outside the road grid.
+  for (let i = 0; i < 40; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 20 + Math.random() * 70;
+    g.fillStyle = 'rgba(150,105,55,0.18)';
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+  // Sidewalks: lighter strips along every road.
+  g.fillStyle = '#cbb28a';
+  for (const line of CITY.grid) {
+    const w = (CITY.roadHalf + 2.2) * 2 * m;
+    g.fillRect(toPx(line) - w / 2, toPx(-CITY.half), w, CITY.half * 2 * m);
+    g.fillRect(toPx(-CITY.half), toPx(line) - w / 2, CITY.half * 2 * m, w);
+  }
+  // Asphalt roads.
+  g.fillStyle = '#3a3a40';
+  for (const line of CITY.grid) {
+    const w = CITY.roadHalf * 2 * m;
+    g.fillRect(toPx(line) - w / 2, toPx(-CITY.half), w, CITY.half * 2 * m);
+    g.fillRect(toPx(-CITY.half), toPx(line) - w / 2, CITY.half * 2 * m, w);
+  }
+  // Dashed centre lines (small and muted: they must read as paint, not glow).
+  g.fillStyle = '#b8a44a';
+  for (const line of CITY.grid) {
+    for (let v = -CITY.half; v < CITY.half; v += 12) {
+      g.fillRect(toPx(line) - 0.5, toPx(v), 1, 3.5 * m);
+      g.fillRect(toPx(v), toPx(line) - 0.5, 3.5 * m, 1);
+    }
+  }
+  // Crosswalks at the central intersections.
+  g.fillStyle = 'rgba(230,230,220,0.85)';
+  for (const a of [-60, 0, 60]) for (const b of [-60, 0, 60]) {
+    for (let k = -3; k <= 3; k++) {
+      g.fillRect(toPx(a + k * 1.6) - 2, toPx(b) - 4 * m, 4, 8 * m);
+      g.fillRect(toPx(a) - 4 * m, toPx(b + k * 1.6) - 2, 8 * m, 4);
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
 }
 
-export function createWorld(random) {
-  const player = { x: 0, y: FIELD.groundY - PLAYER.height, width: PLAYER.width, height: PLAYER.height, invulnerable: 0 };
-  const items = [];
-  for (let index = 0; index < POOL_SIZE; index += 1) {
-    items.push({ active: false, kind: KIND_BLOCK, x: 0, y: 0, width: 0, height: 0, speed: 0 });
+function makeSkyMaterial() {
+  // Gradient dome shader: dusty blue zenith -> warm orange horizon, with a
+  // soft sun glow around the sun direction. No texture, no network.
+  return new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    fog: false,
+    uniforms: {
+      top: { value: new THREE.Color(PALETTE.skyZenith) },
+      horizon: { value: new THREE.Color(PALETTE.skyHorizon) },
+      sunDir: { value: new THREE.Vector3(-0.55, 0.28, -0.45).normalize() },
+      sunColor: { value: new THREE.Color(0xffe6b0) },
+    },
+    vertexShader: `
+      varying vec3 vDir;
+      void main() {
+        vDir = normalize(position);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mv;
+        gl_Position.z = gl_Position.w; // pin to the far plane
+      }`,
+    fragmentShader: `
+      varying vec3 vDir;
+      uniform vec3 top; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 sunColor;
+      void main() {
+        float h = clamp(vDir.y, 0.0, 1.0);
+        vec3 col = mix(horizon, top, pow(h, 0.55));
+        float s = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
+        col += sunColor * (pow(s, 350.0) * 1.2 + pow(s, 24.0) * 0.35 + pow(s, 6.0) * 0.12);
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  });
+}
+
+export function createWorld() {
+  const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('game'), antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.12;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(PALETTE.fog, 120, 700);
+
+  // Sky dome.
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 16), makeSkyMaterial());
+  sky.name = 'sky';
+  scene.add(sky);
+
+  // Golden-hour key sun (casts the only shadows) + hemisphere fill + faint
+  // cool bounce from the opposite side so shadow faces are never pure black.
+  const sun = new THREE.DirectionalLight(PALETTE.sun, PALETTE.sunIntensity);
+  sun.position.set(-140, 90, -110);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  const sc = sun.shadow.camera;
+  sc.near = 10; sc.far = 500;
+  sc.left = -90; sc.right = 90; sc.top = 90; sc.bottom = -90;
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.6;
+  scene.add(sun);
+  scene.add(sun.target);
+  const hemi = new THREE.HemisphereLight(PALETTE.hemiSky, PALETTE.hemiGround, PALETTE.hemiIntensity);
+  scene.add(hemi);
+  const bounce = new THREE.DirectionalLight(0x9fb8d8, 0.6);
+  bounce.position.set(120, 60, 140);
+  scene.add(bounce);
+
+  // Ground: one big plane, albedo canvas texture, rough sand/asphalt.
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(CITY.groundSize, CITY.groundSize),
+    new THREE.MeshStandardMaterial({
+      map: makeGroundTexture(), roughness: 0.93, metalness: 0.0,
+    }),
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  ground.name = 'ground';
+  scene.add(ground);
+
+  // Dune ring: low instanced domes outside the road grid, sand PBR.
+  const duneGeo = new THREE.SphereGeometry(1, 12, 8);
+  duneGeo.scale(1, 0.22, 1);
+  const duneMat = new THREE.MeshStandardMaterial({ color: PALETTE.sandDark, roughness: 1.0, metalness: 0 });
+  const dunes = new THREE.InstancedMesh(duneGeo, duneMat, 90);
+  const dummy = new THREE.Object3D();
+  const col = new THREE.Color();
+  for (let i = 0; i < 90; i++) {
+    const a = (i / 90) * Math.PI * 2 + Math.random() * 0.07;
+    const r = 300 + Math.random() * 260;
+    const s = 30 + Math.random() * 70;
+    dummy.position.set(Math.cos(a) * r, -1, Math.sin(a) * r);
+    dummy.scale.set(s, s * (0.5 + Math.random() * 0.5), s);
+    dummy.rotation.y = Math.random() * Math.PI;
+    dummy.updateMatrix();
+    dunes.setMatrixAt(i, dummy.matrix);
+    col.setHex(Math.random() < 0.5 ? PALETTE.sand : PALETTE.sandDark);
+    dunes.setColorAt(i, col);
   }
-  const state = { player, items, score: 0, lives: LIVES, level: 1, elapsed: 0, blockTimer: 0, coinTimer: 0 };
+  dunes.instanceMatrix.needsUpdate = true;
+  if (dunes.instanceColor) dunes.instanceColor.needsUpdate = true;
+  scene.add(dunes);
 
-  function reset() {
-    player.x = (FIELD.width - player.width) / 2;
-    player.invulnerable = 0;
-    for (const item of items) item.active = false;
-    state.score = 0;
-    state.lives = LIVES;
-    state.level = 1;
-    state.elapsed = 0;
-    state.blockTimer = BLOCK.interval;
-    state.coinTimer = COIN.interval;
+  // Mountain ridge: flat-topped mesas (truncated cones, 7 sides) on the
+  // horizon — desert buttes, not pyramids.
+  const mountainMat = new THREE.MeshStandardMaterial({ color: 0x8a6a52, roughness: 1, metalness: 0, flatShading: true });
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2;
+    const r = CITY.mountainRing + Math.random() * 80;
+    const h = 70 + Math.random() * 110;
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(28 + Math.random() * 40, 95 + Math.random() * 70, h, 7), mountainMat);
+    m.position.set(Math.cos(a) * r, h / 2 - 4, Math.sin(a) * r);
+    m.rotation.y = Math.random() * Math.PI;
+    scene.add(m);
   }
 
-  function freeItem() {
-    for (let index = 0; index < items.length; index += 1) if (!items[index].active) return items[index];
-    return null;
+  // Drifting dust: one Points cloud that wraps around the player.
+  const dustCount = 700;
+  const dustPos = new Float32Array(dustCount * 3);
+  for (let i = 0; i < dustCount; i++) {
+    dustPos[i * 3] = (Math.random() - 0.5) * 320;
+    dustPos[i * 3 + 1] = Math.random() * 24 + 0.5;
+    dustPos[i * 3 + 2] = (Math.random() - 0.5) * 320;
   }
+  const dustGeo = new THREE.BufferGeometry();
+  dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+  const dot = document.createElement('canvas');
+  dot.width = 64; dot.height = 64;
+  const dg = dot.getContext('2d');
+  const grad = dg.createRadialGradient(32, 32, 2, 32, 32, 30);
+  grad.addColorStop(0, 'rgba(255,230,190,0.55)');
+  grad.addColorStop(1, 'rgba(255,230,190,0)');
+  dg.fillStyle = grad; dg.fillRect(0, 0, 64, 64);
+  const dotTex = new THREE.CanvasTexture(dot);
+  const dustMat = new THREE.PointsMaterial({
+    size: 3.2, map: dotTex, transparent: true, opacity: 0.32,
+    depthWrite: false, sizeAttenuation: true, color: 0xffdfae,
+  });
+  const dust = new THREE.Points(dustGeo, dustMat);
+  dust.name = 'dust';
+  scene.add(dust);
 
-  function spawnBlock() {
-    const item = freeItem();
-    if (item === null) return;
-    item.active = true;
-    item.kind = KIND_BLOCK;
-    item.width = BLOCK.minWidth + random() * (BLOCK.maxWidth - BLOCK.minWidth);
-    item.height = BLOCK.height;
-    item.x = random() * (FIELD.width - item.width);
-    item.y = -item.height;
-    item.speed = BLOCK.speed + BLOCK.speedPerLevel * (state.level - 1) + random() * BLOCK.speedJitter;
+  // Light shafts: three big additive cones leaning from the sun over the
+  // motel block — cheap volumetric god rays for the golden hour.
+  const shaftMat = new THREE.MeshBasicMaterial({
+    color: 0xffd9a0, transparent: true, opacity: 0.05,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
+  });
+  const shafts = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(14 + i * 6, 120, 16, 1, true), shaftMat);
+    cone.position.set(-60 + i * 18, 55, -60 - i * 8);
+    cone.rotation.z = 0.5;
+    cone.rotation.x = -0.25;
+    shafts.add(cone);
   }
+  scene.add(shafts);
 
-  function spawnCoin() {
-    const item = freeItem();
-    if (item === null) return;
-    item.active = true;
-    item.kind = KIND_COIN;
-    item.width = COIN.size;
-    item.height = COIN.size;
-    item.x = random() * (FIELD.width - item.width);
-    item.y = -item.height;
-    item.speed = COIN.speed + COIN.speedPerLevel * (state.level - 1);
-  }
-
-  function blockInterval() {
-    return Math.max(BLOCK.minInterval, BLOCK.interval * BLOCK.intervalScale ** (state.level - 1));
-  }
-
-  /**
-   * One fixed step. `direction` is -1, 0 or 1 (left, still, right). With `harmless` set (the title
-   * screen's backdrop) things fall but nothing touches the player and nothing scores.
-   */
-  function step(dt, direction, harmless) {
-    let events = 0;
-    state.elapsed += dt;
-    state.level = Math.min(LEVEL.max, 1 + Math.floor(state.elapsed / LEVEL.seconds));
-
-    player.x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * dt));
-    if (player.invulnerable > 0) player.invulnerable = Math.max(0, player.invulnerable - dt);
-
-    state.blockTimer -= dt;
-    if (state.blockTimer <= 0) {
-      spawnBlock();
-      state.blockTimer += blockInterval();
-    }
-    state.coinTimer -= dt;
-    if (state.coinTimer <= 0) {
-      spawnCoin();
-      state.coinTimer += COIN.interval + random() * COIN.intervalJitter;
-    }
-
-    for (let index = 0; index < items.length; index += 1) {
-      const item = items[index];
-      if (!item.active) continue;
-      item.y += item.speed * dt;
-      if (item.y > FIELD.groundY) {
-        item.active = false;
-        if (item.kind === KIND_BLOCK && !harmless) state.score += BLOCK.dodgePoints;
-        continue;
+  const world = {
+    renderer, scene, sun, hemi, bounce, dust, dustMat, shafts,
+    storm: 0, // 0 calm -> 1 full dust storm
+    update(dt, focus, time) {
+      // Shadow frustum follows the player so shadows stay crisp.
+      sun.position.set(focus.x - 140, 90, focus.z - 110);
+      sun.target.position.set(focus.x, 0, focus.z);
+      sun.target.updateMatrixWorld();
+      // Dust drifts with the wind and wraps around the focus point.
+      const pos = dustGeo.attributes.position;
+      const wind = 2.5 + this.storm * 14;
+      for (let i = 0; i < dustCount; i++) {
+        let x = pos.getX(i) + (wind + Math.sin(time * 0.3 + i) * 0.8) * dt;
+        let y = pos.getY(i) + Math.sin(time * 0.5 + i * 1.7) * 0.25 * dt;
+        let z = pos.getZ(i) + Math.cos(time * 0.22 + i) * 0.6 * dt;
+        if (x - focus.x > 160) x -= 320;
+        if (x - focus.x < -160) x += 320;
+        if (z - focus.z > 160) z -= 320;
+        if (z - focus.z < -160) z += 320;
+        if (y < 0.4) y = 0.4;
+        if (y > 26) y = 26;
+        pos.setXYZ(i, x, y, z);
       }
-      if (harmless || !overlaps(item, player)) continue;
-      if (item.kind === KIND_COIN) {
-        item.active = false;
-        state.score += COIN.points;
-        events |= EVENT_COIN;
-      } else if (player.invulnerable === 0) {
-        item.active = false;
-        state.lives -= 1;
-        player.invulnerable = PLAYER.invulnerable;
-        events |= EVENT_HIT;
-        if (state.lives === 0) {
-          events |= EVENT_OVER;
-          break;
-        }
-      }
-    }
-    return events;
-  }
-
-  reset();
-  return { state, reset, step };
+      pos.needsUpdate = true;
+      dust.position.set(0, 0, 0);
+      // Storm ramps fog in and thickens the dust.
+      const targetFogNear = 120 - this.storm * 80;
+      const targetFogFar = 700 - this.storm * 480;
+      scene.fog.near += (targetFogNear - scene.fog.near) * Math.min(1, dt * 0.8);
+      scene.fog.far += (targetFogFar - scene.fog.far) * Math.min(1, dt * 0.8);
+      dustMat.opacity = 0.32 + this.storm * 0.4;
+      dustMat.size = 3.2 + this.storm * 3.5;
+    },
+  };
+  return world;
 }
