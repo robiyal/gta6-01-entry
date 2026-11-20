@@ -27,10 +27,46 @@ function makeBeacon(color) {
   return g;
 }
 
-export function createMissions(scene) {
+export function createMissions(scene, colliders) {
   const beacon = makeBeacon(0xffc53d);
   beacon.visible = false;
   scene.add(beacon);
+
+  // Arrival is measured against the target landmark's SOLID FOOTPRINT,
+  // not its centre. The centre-distance rule (radius 12, round 3) only
+  // worked on the near faces: the Garage centre is 11.3 m from its
+  // north/south faces but 17.3 m from its west/east faces (15 m
+  // half-width + 2.3 m car radius), so a car pulling up to the west
+  // face — the natural approach from the Chapel — could never complete
+  // M3, and the only completable zone was a 0.7 m sliver on the
+  // north/south faces (measured live 2026-11-20: the probe drove the
+  // whole route, clamped at x=42.7 against the west face, 17.3 m from
+  // the centre, and oscillated there for 1200 frames). The target box
+  // is the collider whose centre is nearest the landmark centre (the
+  // Motel has a second wing box, the Chapel a tower box — the
+  // nearest-centre box is the main building in both cases). ARRIVE_BOX
+  // 6.3 m from the wall is the same parking slack the old 12 m centre
+  // radius allowed on the near faces: the car centre is never closer
+  // than the 2.3 m radius, so it means "parked at the place, edge
+  // within 4 m of the wall" — from ANY face, and no drive-by can
+  // trigger it (roads are 60 m apart; the only road close to a box
+  // is the one that runs into it).
+  const ARRIVE_BOX = 6.3;
+  const targetBox = {};
+  for (const [id, lm] of Object.entries(LANDMARKS)) {
+    let best = null, bestD = 1e9;
+    for (const b of colliders || []) {
+      const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+      const dd = Math.hypot(cx - lm.x, cz - lm.z);
+      if (dd < bestD) { bestD = dd; best = b; }
+    }
+    if (best) targetBox[id] = best;
+  }
+  function distToBox(px, pz, box) {
+    const dx = Math.max(box.x0 - px, 0, px - box.x1);
+    const dz = Math.max(box.z0 - pz, 0, pz - box.z1);
+    return Math.hypot(dx, dz);
+  }
 
   const state = {
     index: 0,           // next mission to run
@@ -72,19 +108,19 @@ export function createMissions(scene) {
     }
     const t = targetPos();
     if (!t) return null;
-    const d = Math.hypot(playerPos.x - t.x, playerPos.z - t.z);
+    const lmId = state.phase === 'pickup' ? state.active.from : state.active.to;
+    const box = targetBox[lmId] || null;
+    const d = box ? distToBox(playerPos.x, playerPos.z, box)
+      : Math.hypot(playerPos.x - t.x, playerPos.z - t.z);
     beacon.position.set(t.x, 0, t.z);
     beacon.userData.ring.position.y = 0.15 + Math.sin(performance.now() * 0.004) * 0.25;
     beacon.userData.ring.rotation.z += dt * 0.6;
     // Steal missions complete their pickup by taking the car, not by arriving.
     if (state.active.stealCar && state.phase === 'pickup') return null;
-    // Arrival radius 12m: mission targets are landmark CENTRES, and the
-    // landmarks are solid buildings — the closest a car can get to the
-    // Garage centre is 11.3m (9m half-depth + 2.3m radius), 10.3m at the
-    // Diner, 9.3m at the Gas & Go, 8.3m at the Motel. With radius 6 no
-    // mission could ever complete in live play (measured 2026-11-20).
-    // 12m means "pulled up at the place", not "inside the walls".
-    if (d < 12) {
+    // Arrival: within ARRIVE_BOX of the target's walls (or 12 m of its
+    // centre if no footprint was found). See the note at the top of
+    // createMissions for why the centre rule could never complete M3.
+    if (d < (box ? ARRIVE_BOX : 12)) {
       if (state.phase === 'pickup') {
         state.phase = 'deliver';
         return { type: 'picked-up', mission: state.active };

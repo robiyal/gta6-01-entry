@@ -28,7 +28,7 @@ const input = createInput();
 const audio = createAudio();
 const traffic = createTraffic(scene, colliders);
 const police = createPolice(scene, colliders, audio);
-const missions = createMissions(scene);
+const missions = createMissions(scene, colliders);
 const combat = createCombat(scene, audio);
 const player = createPlayer(scene, colliders);
 const rig = createCameraRig(camera);
@@ -57,9 +57,17 @@ const ownCar = { mesh: ownCarMesh, state: makeCarState(-52, -52, Math.PI / 4), o
 
 const goldMesh = makeCar(0xe8b13c, { name: 'gold-coupe' });
 goldMesh.position.set(-104, 0, -112);
-goldMesh.rotation.y = -Math.PI / 2;
+goldMesh.rotation.y = Math.PI;
 scene.add(goldMesh);
-const goldCar = { mesh: goldMesh, state: makeCarState(-104, -112, -Math.PI / 2), gold: true };
+// The coupe faces SOUTH (heading PI), straight at its exit road z=-120,
+// 8 m ahead. It used to face WEST (-PI/2), straight at the chapel's east
+// wall (x=-113) 9 m ahead: the first move was a U-turn in a 9 m pocket,
+// and the grind rule (speed x0.55 per colliding step + no steering below
+// 0.3 m/s) wedged it against that wall at exactly the car radius (2.3 m)
+// — measured live 2026-11-20, same deadlock as the round-3 cruiser spawn.
+// The south lane is clear: nearest collider is the same chapel wall,
+// 9.0 m west of the exit path (6.7 m past the 2.3 m radius).
+const goldCar = { mesh: goldMesh, state: makeCarState(-104, -112, Math.PI), gold: true };
 
 // ---- Game state.
 const save = loadSave();
