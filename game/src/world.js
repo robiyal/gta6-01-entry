@@ -84,6 +84,67 @@ function makeGroundTexture() {
       g.fillRect(toPx(a) - 4 * m, toPx(b + k * 1.6) - 2, 8 * m, 4);
     }
   }
+  // Road wear (round 4 visual revision): asphalt is never one flat grey.
+  // Patch repairs, hairline cracks, tyre-worn wheel tracks, oil stains at
+  // the intersections, and faded paint where the centre dashes have worn.
+  for (let i = 0; i < 46; i++) {
+    const line = CITY.grid[Math.floor(Math.random() * CITY.grid.length)];
+    const vertical = Math.random() < 0.5;
+    const along = -CITY.half + 20 + Math.random() * (CITY.half * 2 - 40);
+    const w = (3 + Math.random() * 6) * m, h = (2 + Math.random() * 5) * m;
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(20,20,24,0.28)' : 'rgba(70,70,78,0.22)';
+    const px = vertical ? toPx(line) - w / 2 : toPx(along) - w / 2;
+    const py = vertical ? toPx(along) - h / 2 : toPx(line) - h / 2;
+    g.fillRect(px, py, w, h);
+  }
+  // Tyre tracks: two darker wheel lines down each lane, so the road reads
+  // as driven, not painted.
+  g.fillStyle = 'rgba(18,18,22,0.16)';
+  for (const line of CITY.grid) {
+    for (const off of [-2.6, -1.4, 1.4, 2.6]) {
+      g.fillRect(toPx(line + off) - 0.55 * m, toPx(-CITY.half), 1.1 * m, CITY.half * 2 * m);
+      g.fillRect(toPx(-CITY.half), toPx(line + off) - 0.55 * m, CITY.half * 2 * m, 1.1 * m);
+    }
+  }
+  // Cracks: thin dark polylines across the asphalt.
+  g.strokeStyle = 'rgba(15,15,18,0.35)';
+  g.lineWidth = 1.2;
+  for (let i = 0; i < 42; i++) {
+    const line = CITY.grid[Math.floor(Math.random() * CITY.grid.length)];
+    const vertical = Math.random() < 0.5;
+    const along = -CITY.half + 20 + Math.random() * (CITY.half * 2 - 40);
+    let x = vertical ? toPx(line) + (Math.random() - 0.5) * 6 * m : toPx(along);
+    let y = vertical ? toPx(along) : toPx(line) + (Math.random() - 0.5) * 6 * m;
+    g.beginPath(); g.moveTo(x, y);
+    for (let k = 0; k < 5; k++) {
+      x += (Math.random() - 0.5) * 4 * m;
+      y += (Math.random() - 0.5) * 4 * m + (vertical ? 1.5 * m : 0);
+      if (!vertical) x += 1.5 * m;
+      g.lineTo(x, y);
+    }
+    g.stroke();
+  }
+  // Oil stains at the intersections, where cars idle.
+  for (const a of [-120, -60, 0, 60, 120]) for (const b of [-120, -60, 0, 60, 120]) {
+    if (Math.random() < 0.4) continue;
+    g.fillStyle = 'rgba(12,12,16,0.3)';
+    g.beginPath();
+    g.ellipse(toPx(a + (Math.random() - 0.5) * 4), toPx(b + (Math.random() - 0.5) * 4), 1.6 * m, 1.1 * m, Math.random() * 3, 0, Math.PI * 2);
+    g.fill();
+  }
+  // Curbs: a darker edge line where the sidewalk meets the asphalt, and a
+  // lighter worn top edge — the sidewalk reads as a raised slab, not paint.
+  for (const line of CITY.grid) {
+    for (const s of [-1, 1]) {
+      const edge = line + s * (CITY.roadHalf + 2.2);
+      g.fillStyle = 'rgba(90,70,45,0.5)';
+      g.fillRect(toPx(edge) - 0.35 * m, toPx(-CITY.half), 0.7 * m, CITY.half * 2 * m);
+      g.fillRect(toPx(-CITY.half), toPx(edge) - 0.35 * m, CITY.half * 2 * m, 0.7 * m);
+      g.fillStyle = 'rgba(240,215,170,0.35)';
+      g.fillRect(toPx(edge - s * 0.4) - 0.2 * m, toPx(-CITY.half), 0.4 * m, CITY.half * 2 * m);
+      g.fillRect(toPx(-CITY.half), toPx(edge - s * 0.4) - 0.2 * m, CITY.half * 2 * m, 0.4 * m);
+    }
+  }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
@@ -129,13 +190,13 @@ export function createWorld() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap; // soft edges, not hard slabs
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.12;
+  renderer.toneMappingExposure = 1.16;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(PALETTE.fog, 120, 700);
+  scene.fog = new THREE.Fog(PALETTE.fog, 100, 650);
 
   // Sky dome.
   const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 16), makeSkyMaterial());
@@ -155,9 +216,12 @@ export function createWorld() {
   sun.shadow.normalBias = 0.6;
   scene.add(sun);
   scene.add(sun.target);
-  const hemi = new THREE.HemisphereLight(PALETTE.hemiSky, PALETTE.hemiGround, PALETTE.hemiIntensity);
+  const hemi = new THREE.HemisphereLight(PALETTE.hemiSky, PALETTE.hemiGround, 1.05);
   scene.add(hemi);
-  const bounce = new THREE.DirectionalLight(0x9fb8d8, 0.6);
+  // Warm bounce from the south-east: the low sun lights the north-west
+  // faces, so without a warm fill the south faces the chase camera sees
+  // go flat and dark. Warm, not cool — golden hour has no blue fill.
+  const bounce = new THREE.DirectionalLight(0xffc890, 0.85);
   bounce.position.set(120, 60, 140);
   scene.add(bounce);
 
@@ -251,6 +315,35 @@ export function createWorld() {
   }
   scene.add(shafts);
 
+  // High desert clouds: soft billboard puffs, warm-lit underneath by the
+  // low sun, drifting slowly across the sky dome. The old sky was a bare
+  // gradient — a desert sky at golden hour has clouds in it.
+  const cloudCanvas = document.createElement('canvas');
+  cloudCanvas.width = 256; cloudCanvas.height = 128;
+  const cg = cloudCanvas.getContext('2d');
+  for (const [cx, cy, r, a] of [[70, 80, 46, 0.5], [120, 70, 55, 0.55], [180, 85, 40, 0.45], [95, 55, 30, 0.4], [150, 50, 34, 0.4], [210, 75, 30, 0.35]]) {
+    const grad = cg.createRadialGradient(cx, cy, 2, cx, cy, r);
+    grad.addColorStop(0, `rgba(255,235,215,${a})`);
+    grad.addColorStop(1, 'rgba(255,235,215,0)');
+    cg.fillStyle = grad;
+    cg.fillRect(0, 0, 256, 128);
+  }
+  const cloudTex = new THREE.CanvasTexture(cloudCanvas);
+  const clouds = [];
+  for (let i = 0; i < 9; i++) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: cloudTex, transparent: true, opacity: 0.5 + Math.random() * 0.25,
+      depthWrite: false, fog: false,
+    }));
+    const a = (i / 9) * Math.PI * 2 + Math.random() * 0.6;
+    const r = 320 + Math.random() * 320;
+    sp.position.set(Math.cos(a) * r, 130 + Math.random() * 90, Math.sin(a) * r);
+    const s = 120 + Math.random() * 140;
+    sp.scale.set(s, s * 0.42, 1);
+    scene.add(sp);
+    clouds.push(sp);
+  }
+
   const world = {
     renderer, scene, sun, hemi, bounce, dust, dustMat, shafts,
     storm: 0, // 0 calm -> 1 full dust storm
@@ -276,9 +369,15 @@ export function createWorld() {
       }
       pos.needsUpdate = true;
       dust.position.set(0, 0, 0);
+      // Clouds drift with the wind and wrap around the focus point.
+      for (const c of clouds) {
+        c.position.x += dt * 1.5;
+        if (c.position.x - focus.x > 420) c.position.x -= 840;
+        if (c.position.x - focus.x < -420) c.position.x += 840;
+      }
       // Storm ramps fog in and thickens the dust.
-      const targetFogNear = 120 - this.storm * 80;
-      const targetFogFar = 700 - this.storm * 480;
+      const targetFogNear = 100 - this.storm * 80;
+      const targetFogFar = 650 - this.storm * 480;
       scene.fog.near += (targetFogNear - scene.fog.near) * Math.min(1, dt * 0.8);
       scene.fog.far += (targetFogFar - scene.fog.far) * Math.min(1, dt * 0.8);
       dustMat.opacity = 0.32 + this.storm * 0.4;

@@ -61,6 +61,16 @@
   #crosshair::after { top: 10px; left: 0; width: 22px; height: 2px; }
   #vignette { position: fixed; inset: 0; pointer-events: none; z-index: 4; opacity: 0;
     background: radial-gradient(ellipse at center, transparent 55%, rgba(200, 20, 20, 0.55) 100%); transition: opacity 0.3s; }
+  /* Cinematic grade (round 4 visual revision): a gentle warm vignette +
+     top glow over the 3D view only — z-index 3 sits above the canvas and
+     below the HUD (5) and the full screens (10). This is the closest the
+     stack gets to a filmic grade without a vendored post pipeline: it
+     deepens the frame edges and warms the highlights, the same job a
+     subtle ACES + grade pass would do. */
+  #grade { position: fixed; inset: 0; pointer-events: none; z-index: 3;
+    background:
+      radial-gradient(ellipse at center, transparent 58%, rgba(30, 16, 6, 0.30) 100%),
+      linear-gradient(180deg, rgba(255, 180, 90, 0.05), transparent 30%, transparent 75%, rgba(20, 10, 4, 0.10)); }
   #vignette.wanted-pulse { animation: vpulse 1s infinite alternate; }
   @keyframes vpulse { from { opacity: 0.15; } to { opacity: 0.4; } }
 
@@ -112,6 +122,7 @@
 <canvas id="game" aria-label="Dusthaven: drive, steal cars, outrun the sheriff and finish three jobs"></canvas>
 <p id="status" role="status" aria-live="polite"></p>
 <div id="vignette"></div>
+<div id="grade"></div>
 
 <div id="hud" class="hidden">
   <div id="stats" class="panel">

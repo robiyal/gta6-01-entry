@@ -19,7 +19,11 @@ export function makeCar(color, opts = {}) {
     color, roughness: 0.32, metalness: 0.55,
   });
   const glass = new THREE.MeshStandardMaterial({
-    color: 0x2a3a48, roughness: 0.18, metalness: 0.7,
+    // Lighter blue glass with a sky-lit tint: the old near-black cabin
+    // read as a hole in the car from the chase camera. High metalness so
+    // it catches the sun, slight emissive so it never goes to black.
+    color: 0x5a7a92, roughness: 0.12, metalness: 0.9,
+    emissive: 0x16242e, emissiveIntensity: 0.5,
   });
   const dark = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.8, metalness: 0.2 });
   const chrome = new THREE.MeshStandardMaterial({ color: 0xd8d8d8, roughness: 0.2, metalness: 0.9 });
@@ -44,16 +48,33 @@ export function makeCar(color, opts = {}) {
     b.position.set(0, 0.32, z);
     g.add(b);
   }
-  // Wheels.
+  // Wheels with hubcaps: a light disc on the outer face so the wheels
+  // read as wheels, not black holes, at chase distance.
   const wheels = [];
+  const hubGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.32, 10);
   for (const [x, z] of [[-0.95, 1.45], [0.95, 1.45], [-0.95, -1.45], [0.95, -1.45]]) {
     const w = new THREE.Mesh(wheelGeo, dark);
     w.rotation.z = Math.PI / 2;
     w.position.set(x, 0.36, z);
     w.castShadow = true;
     g.add(w);
+    const hub = new THREE.Mesh(hubGeo, chrome);
+    hub.rotation.z = Math.PI / 2;
+    hub.position.set(x, 0.36, z);
+    g.add(hub);
     wheels.push(w);
   }
+  // Side mirrors + front grille: small chrome touches that make the car
+  // read as a car from the side and the front, not a painted box.
+  const mirrorGeo = new THREE.BoxGeometry(0.16, 0.12, 0.22);
+  for (const x of [-1.02, 1.02]) {
+    const m = new THREE.Mesh(mirrorGeo, chrome);
+    m.position.set(x, 1.0, 0.75);
+    g.add(m);
+  }
+  const grille = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.22, 0.08), dark);
+  grille.position.set(0, 0.55, 2.22);
+  g.add(grille);
   // Headlights (warm) and taillights (red emissive).
   const headMat = new THREE.MeshStandardMaterial({
     color: 0xfff2c8, emissive: 0xffe9a8, emissiveIntensity: 0.9, roughness: 0.3,

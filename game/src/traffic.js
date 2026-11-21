@@ -6,23 +6,109 @@ import { CITY, PALETTE, TUNING, nearestRoad, onRoad } from './config.js';
 import { makeCar, makeCarState, updateCar, syncCarMesh, pushCars } from './vehicles.js';
 import { collideCircle } from './city.js';
 
-const PED_COLORS = [0xd8c8a8, 0x7a9e6b, 0xc98d5f, 0x5a7a9e, 0x9e5a6b, 0xd8d3c8];
+const PED_SHIRTS = [0xd8c8a8, 0x7a9e6b, 0xc98d5f, 0x5a7a9e, 0x9e5a6b, 0xd8d3c8, 0x4a8a7a, 0xc96a3d, 0x8a6a9e, 0xd8b13c, 0x5a8a4a, 0xb85a5a];
+const PED_PANTS = [0x2e4a5a, 0x4a3a28, 0x2b2b2e, 0x6b5a3a, 0x3a4a3a, 0x5a5a6b];
+const PED_SKINS = [0xc98d6a, 0x8a5a3b, 0xe8b88a, 0x6b4530];
+const PED_HATS = [0x6b4a2f, 0x8a6a3a, 0x2b2b2e, 0xd8c8a8];
 
-function makePedestrian(color) {
+// A pedestrian that reads as a person, not a pin: legs and arms on hip /
+// shoulder pivots so they swing with the walk cycle, a torso with real
+// width, and per-ped variation — height, build, shirt, trousers, skin and
+// headwear (wide-brim hat, cap, or hair). The deputy (police.js) keeps its
+// own sheriff build, so no ped can be mistaken for law.
+function makePedestrian() {
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0 });
-  const skinMat = new THREE.MeshStandardMaterial({ color: 0xc98d6a, roughness: 0.7, metalness: 0 });
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, 0.9, 4, 8), bodyMat);
-  body.position.y = 1.0;
-  body.castShadow = true;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), skinMat);
-  head.position.y = 1.85;
+  const scale = 0.92 + Math.random() * 0.18; // height 0.92..1.10
+  const build = 0.85 + Math.random() * 0.3;  // torso / limb thickness
+  const shirt = new THREE.MeshStandardMaterial({
+    color: PED_SHIRTS[Math.floor(Math.random() * PED_SHIRTS.length)],
+    roughness: 0.9, metalness: 0,
+  });
+  const pants = new THREE.MeshStandardMaterial({
+    color: PED_PANTS[Math.floor(Math.random() * PED_PANTS.length)],
+    roughness: 0.95, metalness: 0,
+  });
+  const skin = new THREE.MeshStandardMaterial({
+    color: PED_SKINS[Math.floor(Math.random() * PED_SKINS.length)],
+    roughness: 0.7, metalness: 0,
+  });
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.3 * build, 0.62, 4, 8), shirt);
+  torso.position.y = 1.12;
+  torso.scale.x = build;
+  torso.castShadow = true;
+  g.add(torso);
+  // Legs: capsule children of hip pivots, so rotation.x swings from the hip.
+  const legGeo = new THREE.CapsuleGeometry(0.12 * build, 0.5, 4, 8);
+  const legL = new THREE.Group();
+  legL.position.set(-0.15 * build, 0.85, 0);
+  const legLMesh = new THREE.Mesh(legGeo, pants);
+  legLMesh.position.y = -0.42;
+  legLMesh.castShadow = true;
+  legL.add(legLMesh);
+  const legR = new THREE.Group();
+  legR.position.set(0.15 * build, 0.85, 0);
+  const legRMesh = new THREE.Mesh(legGeo, pants);
+  legRMesh.position.y = -0.42;
+  legRMesh.castShadow = true;
+  legR.add(legRMesh);
+  g.add(legL, legR);
+  // Arms: capsule children of shoulder pivots, counter-swinging the legs.
+  const armGeo = new THREE.CapsuleGeometry(0.1 * build, 0.42, 4, 8);
+  const armL = new THREE.Group();
+  armL.position.set(-0.4 * build, 1.42, 0);
+  const armLMesh = new THREE.Mesh(armGeo, shirt);
+  armLMesh.position.y = -0.32;
+  armLMesh.castShadow = true;
+  armL.add(armLMesh);
+  const armR = new THREE.Group();
+  armR.position.set(0.4 * build, 1.42, 0);
+  const armRMesh = new THREE.Mesh(armGeo, shirt);
+  armRMesh.position.y = -0.32;
+  armRMesh.castShadow = true;
+  armR.add(armRMesh);
+  g.add(armL, armR);
+  // Hands: small skin spheres at the arm ends so the arms read as arms.
+  for (const arm of [armL, armR]) {
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), skin);
+    hand.position.y = -0.62;
+    arm.add(hand);
+  }
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), skin);
+  head.position.y = 1.82;
   head.castShadow = true;
-  const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.38, 0.1, 10),
-    new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 0.9 }));
-  hat.position.y = 2.05;
-  g.add(body, head, hat);
-  g.userData.body = body;
+  g.add(head);
+  // Headwear: wide-brim hat, cap, or hair — never the same silhouette twice.
+  const h = Math.random();
+  if (h < 0.5) {
+    const hatMat = new THREE.MeshStandardMaterial({
+      color: PED_HATS[Math.floor(Math.random() * PED_HATS.length)], roughness: 0.9,
+    });
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.38, 0.06, 12), hatMat);
+    brim.position.y = 1.98;
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.23, 0.2, 10), hatMat);
+    crown.position.y = 2.08;
+    g.add(brim, crown);
+  } else if (h < 0.7) {
+    const capMat = new THREE.MeshStandardMaterial({
+      color: PED_SHIRTS[Math.floor(Math.random() * PED_SHIRTS.length)], roughness: 0.9,
+    });
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.25, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
+    cap.position.y = 1.84;
+    const peak = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.22), capMat);
+    peak.position.set(0, 1.95, 0.26);
+    g.add(cap, peak);
+  } else {
+    const hairMat = new THREE.MeshStandardMaterial({
+      color: [0x2b1d12, 0x1c1c22, 0x6b6b6b, 0x4a2e18][Math.floor(Math.random() * 4)],
+      roughness: 0.95,
+    });
+    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.25, 10, 8), hairMat);
+    hair.position.y = 1.9;
+    hair.scale.set(1, 0.75, 1);
+    g.add(hair);
+  }
+  g.scale.setScalar(scale);
+  g.userData = { legL, legR, armL, armR, torso };
   return g;
 }
 
@@ -62,7 +148,7 @@ export function createTraffic(scene, colliders) {
     const side = (Math.random() < 0.5 ? -1 : 1) * (CITY.roadHalf + 2.5);
     const x = vertical ? line + side : along;
     const z = vertical ? along : line + side;
-    const mesh = makePedestrian(PED_COLORS[i % PED_COLORS.length]);
+    const mesh = makePedestrian();
     mesh.position.set(x, 0, z);
     scene.add(mesh);
     peds.push({
@@ -161,7 +247,16 @@ export function createTraffic(scene, colliders) {
       }
       ped.mesh.position.set(ped.pos.x, 0, ped.pos.z);
       ped.mesh.rotation.y = ped.heading;
-      ped.mesh.userData.body.position.y = 1.0 + Math.abs(Math.sin(ped.walkPhase)) * 0.06;
+      // Walk cycle: legs swing from the hips, arms counter-swing from the
+      // shoulders, torso bobs. Fleeing peds swing harder (their walkPhase
+      // already advances faster); strolling peds get a gentle swing.
+      const sw = Math.sin(ped.walkPhase) * (ped.flee > 0 ? 0.65 : 0.45);
+      const u = ped.mesh.userData;
+      u.legL.rotation.x = sw;
+      u.legR.rotation.x = -sw;
+      u.armL.rotation.x = -sw * 0.75;
+      u.armR.rotation.x = sw * 0.75;
+      u.torso.position.y = 1.12 + Math.abs(Math.sin(ped.walkPhase)) * 0.05;
     }
   }
 

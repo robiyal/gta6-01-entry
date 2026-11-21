@@ -19,11 +19,16 @@ function mulberry32(seed) {
   };
 }
 
-function windowTexture(base = '#c98d5f') {
+function windowTexture(base = '#c98d5f', variant = 0) {
   // Wall with a grid of windows; a few windows glow warm (lit rooms).
   // `base` tints the wall: adobe for generic buildings, teal for the diner,
   // blue-grey for the garage, grey for the sheriff's office — one texture
   // function, one lit-window language across the whole town.
+  // Variants (round 4 visual revision — one flat window grid made the
+  // whole skyline read as one texture): 0 standard, 1 warm-lit (more
+  // windows glow, warmer glass — evening rooms), 2 shopfront (the ground
+  // floor is a dark storefront band with a door and wide glass, so the
+  // street level reads as shops instead of a blank wall).
   const c = document.createElement('canvas');
   c.width = 256; c.height = 256;
   const g = c.getContext('2d');
@@ -36,16 +41,36 @@ function windowTexture(base = '#c98d5f') {
   grad.addColorStop(1, 'rgba(90,55,25,0.35)');
   g.fillStyle = grad;
   g.fillRect(0, 0, 256, 256);
-  for (let y = 24; y < 240; y += 44) {
+  const litRatio = variant === 1 ? 0.55 : 0.28;
+  const yStart = variant === 2 ? 24 : 24;
+  const yEnd = variant === 2 ? 180 : 240;
+  for (let y = yStart; y < yEnd; y += 44) {
     for (let x = 20; x < 236; x += 52) {
-      const lit = Math.random() < 0.28;
+      const lit = Math.random() < litRatio;
       g.fillStyle = '#4a3423';
       g.fillRect(x - 2, y - 2, 32, 38);
-      g.fillStyle = lit ? '#ffd98a' : '#2e4a5a';
+      g.fillStyle = lit ? '#ffd98a' : (variant === 1 ? '#3a5a6a' : '#2e4a5a');
       g.fillRect(x, y, 28, 34);
       g.fillStyle = 'rgba(255,255,255,0.25)';
       g.fillRect(x, y, 28, 4);
+      // Sill shadow under each window — the windows sit IN the wall.
+      g.fillStyle = 'rgba(0,0,0,0.3)';
+      g.fillRect(x - 2, y + 36, 32, 3);
     }
+  }
+  if (variant === 2) {
+    // Ground-floor shopfront: dark band, wide glass, a door.
+    g.fillStyle = '#3a2a1c';
+    g.fillRect(0, 186, 256, 70);
+    g.fillStyle = '#ffd98a';
+    g.fillRect(16, 200, 84, 42);
+    g.fillStyle = '#2e4a5a';
+    g.fillRect(156, 200, 84, 42);
+    g.fillStyle = '#241a12';
+    g.fillRect(112, 202, 32, 54);
+    g.fillStyle = 'rgba(255,255,255,0.3)';
+    g.fillRect(16, 200, 84, 5);
+    g.fillRect(156, 200, 84, 5);
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -85,12 +110,12 @@ export function createCity(scene) {
   const group = new THREE.Group();
   group.name = 'city';
 
-  // ---- Generic buildings: one instanced box mass + one instanced roof trim.
-  const winTex = windowTexture();
-  const wallMat = new THREE.MeshStandardMaterial({
-    map: winTex, roughness: 0.85, metalness: 0.0,
-    emissive: 0xffffff, emissiveMap: winTex, emissiveIntensity: 0.12,
-  });
+  // ---- Generic buildings: instanced box masses + roof trims.
+  // Facade variants (round 4 visual revision): the buildings are split
+  // across three instanced meshes, one per windowTexture variant, so the
+  // skyline is not one repeating grid. Variant assignment runs AFTER the
+  // placement loop, so the deterministic placement RNG — and every
+  // collider the probes rely on — is byte-identical to before.
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
   boxGeo.translate(0, 0.5, 0);
   const placements = [];
@@ -125,24 +150,37 @@ export function createCity(scene) {
       }
     }
   }
-  const inst = new THREE.InstancedMesh(boxGeo, wallMat, placements.length);
+  const variantLists = [[], [], []];
+  placements.forEach((p) => {
+    p.variant = Math.floor(rng() * 3);
+    variantLists[p.variant].push(p);
+  });
   const dummy = new THREE.Object3D();
   const col = new THREE.Color();
-  placements.forEach((p, i) => {
-    dummy.position.set(p.x, 0, p.z);
-    dummy.scale.set(p.w, p.h, p.d);
-    dummy.rotation.y = 0;
-    dummy.updateMatrix();
-    inst.setMatrixAt(i, dummy.matrix);
-    col.setHex(PALETTE.adobe[Math.floor(rng() * PALETTE.adobe.length)]);
-    inst.setColorAt(i, col);
+  variantLists.forEach((list, vi) => {
+    if (!list.length) return;
+    const tex = windowTexture('#c98d5f', vi);
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex, roughness: 0.85, metalness: 0.0,
+      emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.12,
+    });
+    const mesh = new THREE.InstancedMesh(boxGeo, mat, list.length);
+    list.forEach((p, i) => {
+      dummy.position.set(p.x, 0, p.z);
+      dummy.scale.set(p.w, p.h, p.d);
+      dummy.rotation.y = 0;
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      col.setHex(PALETTE.adobe[Math.floor(rng() * PALETTE.adobe.length)]);
+      mesh.setColorAt(i, col);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.name = `buildings-v${vi}`;
+    group.add(mesh);
   });
-  inst.instanceMatrix.needsUpdate = true;
-  if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
-  inst.castShadow = true;
-  inst.receiveShadow = true;
-  inst.name = 'buildings';
-  group.add(inst);
 
   // Roof trims: thin coloured slabs on top of each building (parapet accent).
   const trimMat = new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.05 });
@@ -160,6 +198,43 @@ export function createCity(scene) {
   if (trim.instanceColor) trim.instanceColor.needsUpdate = true;
   trim.castShadow = true;
   group.add(trim);
+
+  // Balconies (round 4 visual revision): slab + rail on the south face of
+  // taller buildings — the flat facades gain real depth in the chase
+  // shots, where the camera looks north and sees south faces. Slabs
+  // protrude 1.1 m, well inside the buildings' 2 m+ setback from the
+  // sidewalk, so no collider, road or probe corridor is touched.
+  const balconyList = [];
+  placements.forEach((p) => {
+    if (p.h < 16) return;
+    for (const fy of [4.5, 8.5]) {
+      if (p.h < fy + 4) continue;
+      balconyList.push({ x: p.x, y: fy, z: p.z + p.d / 2 + 0.55, w: Math.min(6, p.w * 0.45) });
+    }
+  });
+  if (balconyList.length) {
+    const slabGeo = new THREE.BoxGeometry(1, 0.16, 1.1);
+    const slabMat = new THREE.MeshStandardMaterial({ color: 0x8a6a4e, roughness: 0.9 });
+    const slabs = new THREE.InstancedMesh(slabGeo, slabMat, balconyList.length);
+    const railGeo = new THREE.BoxGeometry(1, 0.7, 0.08);
+    const railMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2e, roughness: 0.6, metalness: 0.5 });
+    const rails = new THREE.InstancedMesh(railGeo, railMat, balconyList.length);
+    balconyList.forEach((b, i) => {
+      dummy.position.set(b.x, b.y, b.z);
+      dummy.scale.set(b.w, 1, 1);
+      dummy.rotation.y = 0;
+      dummy.updateMatrix();
+      slabs.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(b.x, b.y + 0.45, b.z + 0.52);
+      dummy.updateMatrix();
+      rails.setMatrixAt(i, dummy.matrix);
+    });
+    slabs.instanceMatrix.needsUpdate = true;
+    rails.instanceMatrix.needsUpdate = true;
+    slabs.castShadow = true;
+    slabs.name = 'balconies';
+    group.add(slabs, rails);
+  }
 
   // ---- Landmark hero buildings (individual meshes, own materials).
   const hero = (mat) => {
@@ -461,6 +536,132 @@ export function createCity(scene) {
     cross.position.set(5.5, 8.2, z);
     group.add(cross);
   }
+
+  // Street lamps (round 4 visual revision): warm-lit lamps on the
+  // sidewalks — pools of light break up the flat asphalt in the chase
+  // shots and the town reads as lived-in at golden hour. Positions are
+  // hard-set on sidewalks, >=6.5 m from any road centreline and clear of
+  // every probe leg (bust motel-gap corridor, M3 x=0 / z=60 runs, sweep
+  // legs) — the nearest probe path stays >=3.9 m clear of any lamp.
+  const lampSpots = [];
+  for (const z of [-150, -30, 30, 150]) for (const s of [-1, 1]) lampSpots.push([s * 6.5, z]);
+  for (const x of [-110, -80, 20, 50, 90, 130]) lampSpots.push([x, -66.5]);
+  for (const x of [-150, -110, -80, 20, 80, 110, 150]) lampSpots.push([x, 53.5]);
+  const lampPoleGeo = new THREE.CylinderGeometry(0.12, 0.16, 5, 6);
+  const lampPoleMat = hero({ color: 0x2b2b2e, roughness: 0.6, metalness: 0.5 });
+  const lampPoles = new THREE.InstancedMesh(lampPoleGeo, lampPoleMat, lampSpots.length);
+  const lampHeadGeo = new THREE.BoxGeometry(0.7, 0.22, 0.35);
+  const lampHeadMat = new THREE.MeshStandardMaterial({
+    color: 0xfff2c8, emissive: 0xffe9a8, emissiveIntensity: 1.6, roughness: 0.3,
+  });
+  const lampHeads = new THREE.InstancedMesh(lampHeadGeo, lampHeadMat, lampSpots.length);
+  const poolGeo = new THREE.CircleGeometry(2.6, 16);
+  const poolMat = new THREE.MeshBasicMaterial({
+    color: 0xffe9a8, transparent: true, opacity: 0.13,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  const lampPools = new THREE.InstancedMesh(poolGeo, poolMat, lampSpots.length);
+  lampSpots.forEach(([x, z], i) => {
+    dummy.position.set(x, 2.5, z);
+    dummy.scale.set(1, 1, 1);
+    dummy.rotation.set(0, 0, 0);
+    dummy.updateMatrix();
+    lampPoles.setMatrixAt(i, dummy.matrix);
+    dummy.position.set(x, 5.05, z);
+    dummy.updateMatrix();
+    lampHeads.setMatrixAt(i, dummy.matrix);
+    dummy.position.set(x, 0.06, z);
+    dummy.rotation.set(-Math.PI / 2, 0, 0);
+    dummy.updateMatrix();
+    lampPools.setMatrixAt(i, dummy.matrix);
+    colliders.push({ x0: x - 0.3, z0: z - 0.3, x1: x + 0.3, z1: z + 0.3 });
+  });
+  lampPoles.instanceMatrix.needsUpdate = true;
+  lampHeads.instanceMatrix.needsUpdate = true;
+  lampPools.instanceMatrix.needsUpdate = true;
+  lampPoles.castShadow = true;
+  group.add(lampPoles, lampHeads, lampPools);
+
+  // Crates and barrels (round 4): sidewalk clutter near the shops, diner,
+  // gas station and garage — the street level gains stuff to look at.
+  // All clusters sit >=6.5 m from any road centreline, clear of the probe
+  // corridors, with small colliders so cars and peds push off them.
+  const crateSpots = [[20, -66.5], [-48, 53.5], [48, -53.5], [48, 53.5]];
+  const crateGeo = new THREE.BoxGeometry(1, 1, 1);
+  const crateMat = hero({ color: 0x8a6a3a, roughness: 0.95 });
+  const crateMat2 = hero({ color: 0x6b5a3a, roughness: 0.95 });
+  const barrelGeo = new THREE.CylinderGeometry(0.45, 0.45, 1.1, 10);
+  const barrelMat = hero({ color: 0x4a6b8a, roughness: 0.6, metalness: 0.3 });
+  const crates = new THREE.InstancedMesh(crateGeo, crateMat, crateSpots.length * 3);
+  const crates2 = new THREE.InstancedMesh(crateGeo, crateMat2, crateSpots.length * 2);
+  const barrels = new THREE.InstancedMesh(barrelGeo, barrelMat, crateSpots.length * 2);
+  let ci = 0, ci2 = 0, bi = 0;
+  crateSpots.forEach(([cx, cz]) => {
+    const spots = [[-0.7, 0, 0], [0.5, 0, 0.4], [-0.1, 0, -0.7]];
+    spots.forEach(([ox, oy, oz], k) => {
+      dummy.position.set(cx + ox, 0.5 + (k === 2 ? 1.0 : 0), cz + oz);
+      dummy.scale.set(1, 1, 1);
+      dummy.rotation.set(0, (cx + k) * 0.7, 0);
+      dummy.updateMatrix();
+      crates.setMatrixAt(ci++, dummy.matrix);
+    });
+    [[0.9, -0.6], [-0.9, 0.7]].forEach(([ox, oz]) => {
+      dummy.position.set(cx + ox, 0.5, cz + oz);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      crates2.setMatrixAt(ci2++, dummy.matrix);
+    });
+    [[1.1, 0.5], [-1.1, -0.5]].forEach(([ox, oz]) => {
+      dummy.position.set(cx + ox, 0.55, cz + oz);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      barrels.setMatrixAt(bi++, dummy.matrix);
+    });
+    colliders.push({ x0: cx - 1.6, z0: cz - 1.6, x1: cx + 1.6, z1: cz + 1.6 });
+  });
+  crates.instanceMatrix.needsUpdate = true;
+  crates2.instanceMatrix.needsUpdate = true;
+  barrels.instanceMatrix.needsUpdate = true;
+  crates.castShadow = true;
+  crates2.castShadow = true;
+  barrels.castShadow = true;
+  group.add(crates, crates2, barrels);
+
+  // Palms along the wash banks (round 4): the arroyo gets trees, and the
+  // bridge shot gains vertical green against the sand. The wash band has
+  // no buildings and no probe drives through it — the bridge deck at x=0
+  // is the only crossing, and the nearest palm stands 40 m away from it.
+  const palmSpots = [[-40, 79], [40, 79], [-100, 101], [100, 101], [-160, 79], [160, 79]];
+  const trunkGeo = new THREE.CylinderGeometry(0.16, 0.28, 5, 7);
+  const trunkMat = hero({ color: 0x6b4a2f, roughness: 1 });
+  const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, palmSpots.length);
+  const frondGeo = new THREE.ConeGeometry(0.55, 2.6, 4);
+  frondGeo.scale(1, 1, 0.18);
+  const frondMat = hero({ color: 0x4a7a3d, roughness: 0.9 });
+  const fronds = new THREE.InstancedMesh(frondGeo, frondMat, palmSpots.length * 6);
+  const UP = new THREE.Vector3(0, 1, 0);
+  const dir = new THREE.Vector3();
+  palmSpots.forEach(([x, z], pi) => {
+    dummy.position.set(x, 2.5, z);
+    dummy.scale.set(1, 1, 1);
+    dummy.rotation.set(0, 0, 0.12);
+    dummy.updateMatrix();
+    trunks.setMatrixAt(pi, dummy.matrix);
+    for (let f = 0; f < 6; f++) {
+      const a = (f / 6) * Math.PI * 2 + pi * 0.5;
+      dir.set(Math.cos(a), -0.45, Math.sin(a)).normalize();
+      dummy.quaternion.setFromUnitVectors(UP, dir);
+      dummy.position.set(x + dir.x * 1.1, 5.0 + dir.y * 1.1, z + dir.z * 1.1);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      fronds.setMatrixAt(pi * 6 + f, dummy.matrix);
+    }
+    colliders.push({ x0: x - 0.4, z0: z - 0.4, x1: x + 0.4, z1: z + 0.4 });
+  });
+  trunks.instanceMatrix.needsUpdate = true;
+  fronds.instanceMatrix.needsUpdate = true;
+  trunks.castShadow = true;
+  group.add(trunks, fronds);
 
   scene.add(group);
   return { group, colliders };

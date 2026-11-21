@@ -10,54 +10,141 @@ import * as THREE from 'three';
 export function makeHelicopter() {
   const g = new THREE.Group();
   g.name = 'heli';
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1c1c22, roughness: 0.5, metalness: 0.4 });
-  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.4, metalness: 0.4 });
-  const glassMat = new THREE.MeshStandardMaterial({ color: 0x2a3a48, roughness: 0.15, metalness: 0.7 });
+  // Sheriff air unit: white fuselage with a glass canopy, red tail band,
+  // SHERIFF decals, tail boom + tail rotor, skids on struts, and a
+  // searchlight under the nose. The old box read as a black slab from
+  // below because the whole underside was dark paint in shadow — the new
+  // body is white all round with a faint emissive lift, so no face ever
+  // goes to black, and the glass canopy carries its own glow.
+  const whiteMat = new THREE.MeshStandardMaterial({
+    color: 0xe8e8e8, roughness: 0.35, metalness: 0.35,
+    emissive: 0x2a2a2a, emissiveIntensity: 0.5,
+  });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2e, roughness: 0.5, metalness: 0.4 });
+  const redMat = new THREE.MeshStandardMaterial({ color: 0xc94f3d, roughness: 0.45, metalness: 0.3 });
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: 0x6a9ab8, roughness: 0.08, metalness: 0.9,
+    emissive: 0x1a2a38, emissiveIntensity: 0.6,
+  });
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.6, 4.6), whiteMat);
-  body.position.y = 0;
+  // Rounded fuselage: a squashed sphere reads as an airframe from every
+  // angle; the old sharp box read as a crate.
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1.5, 20, 14), whiteMat);
+  body.scale.set(1, 0.72, 1.55);
   body.castShadow = true;
   g.add(body);
-  const belly = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.8, 3.4), bodyMat);
-  belly.position.y = -1.0;
-  g.add(belly);
-  const nose = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.2, 1.2), glassMat);
-  nose.position.set(0, 0.1, 2.6);
-  g.add(nose);
-  const boom = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 5.2), bodyMat);
-  boom.position.set(0, 0.3, -4.4);
+  // Glass canopy: a second squashed sphere, forward and high, wrapping the
+  // nose — the pilot's greenhouse, not a flat dark panel.
+  const canopy = new THREE.Mesh(new THREE.SphereGeometry(1.15, 18, 12), glassMat);
+  canopy.scale.set(0.92, 0.62, 1.0);
+  canopy.position.set(0, 0.35, 1.35);
+  g.add(canopy);
+  // SHERIFF decals on both flanks, with a gold star.
+  const decalCanvas = document.createElement('canvas');
+  decalCanvas.width = 256; decalCanvas.height = 64;
+  const dg = decalCanvas.getContext('2d');
+  dg.fillStyle = '#e8e8e8'; dg.fillRect(0, 0, 256, 64);
+  dg.fillStyle = '#c9a227';
+  dg.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? 16 : 7, a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+    dg[i === 0 ? 'moveTo' : 'lineTo'](32 + Math.cos(a) * r, 32 + Math.sin(a) * r);
+  }
+  dg.closePath(); dg.fill();
+  dg.fillStyle = '#1c1c22';
+  dg.font = 'bold 34px system-ui, sans-serif';
+  dg.textAlign = 'left'; dg.textBaseline = 'middle';
+  dg.fillText('SHERIFF', 58, 34);
+  const decalTex = new THREE.CanvasTexture(decalCanvas);
+  decalTex.colorSpace = THREE.SRGBColorSpace;
+  const decalMat = new THREE.MeshStandardMaterial({
+    map: decalTex, roughness: 0.4, metalness: 0.2,
+    emissive: 0xffffff, emissiveMap: decalTex, emissiveIntensity: 0.25,
+  });
+  for (const s of [-1, 1]) {
+    const decal = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.65), decalMat);
+    decal.position.set(s * 1.42, -0.05, 0.1);
+    decal.rotation.y = s * Math.PI / 2;
+    g.add(decal);
+  }
+  // Tail boom: tapered, with a red band and a vertical fin.
+  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.5, 4.6, 10), darkMat);
+  boom.rotation.x = Math.PI / 2;
+  boom.position.set(0, 0.25, -4.2);
+  boom.castShadow = true;
   g.add(boom);
-  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.8, 1.2), bodyMat);
-  fin.position.set(0, 0.9, -6.8);
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.5, 10), redMat);
+  band.rotation.x = Math.PI / 2;
+  band.position.set(0, 0.25, -3.4);
+  g.add(band);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.9, 1.3), darkMat);
+  fin.position.set(0, 0.9, -6.4);
   g.add(fin);
+  // Tail rotor: two small blades on the fin, spinning with the main rotor.
+  const tailRotor = new THREE.Group();
+  tailRotor.position.set(0.25, 1.0, -6.5);
+  const trBladeMat = new THREE.MeshStandardMaterial({ color: 0x1c1c22, roughness: 0.5, metalness: 0.3 });
+  for (const a of [0, Math.PI / 2]) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.9, 0.16), trBladeMat);
+    b.rotation.z = a;
+    tailRotor.add(b);
+  }
+  g.add(tailRotor);
+  g.userData.tailRotor = tailRotor;
+  // Skids on four struts — the old heli floated on two bare tubes.
   const skidMat = new THREE.MeshStandardMaterial({ color: 0x3a3a40, roughness: 0.6, metalness: 0.5 });
   for (const x of [-1.2, 1.2]) {
     const skid = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.4, 6), skidMat);
     skid.rotation.x = Math.PI / 2;
     skid.position.set(x, -1.7, 0.4);
     g.add(skid);
+    for (const z of [-0.9, 1.6]) {
+      const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.9, 6), skidMat);
+      strut.position.set(x, -1.25, z);
+      strut.rotation.z = x > 0 ? 0.35 : -0.35;
+      g.add(strut);
+    }
   }
+  // Searchlight bulb under the nose (the cone + ground pool already exist
+  // below and are aimed by update()/place()).
+  const lamp = new THREE.Mesh(
+    new THREE.SphereGeometry(0.28, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0xfff2c8, emissive: 0xffe9a8, emissiveIntensity: 2.2, roughness: 0.3 }),
+  );
+  lamp.position.set(0, -0.95, 1.9);
+  g.add(lamp);
   // Main rotor: two long blades on a mast, spinning. A translucent disc
-  // sells the blur without a texture.
+  // sells the blur without a texture — two discs now, so the blur reads
+  // from below as well as from the side.
   const rotor = new THREE.Group();
   rotor.position.y = 1.3;
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.9, 8), bodyMat);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.9, 8), darkMat);
   mast.position.y = 0.2;
   rotor.add(mast);
   const bladeMat = new THREE.MeshStandardMaterial({ color: 0x1c1c22, roughness: 0.5, metalness: 0.3 });
+  const tipMat = new THREE.MeshStandardMaterial({ color: 0xffc53d, roughness: 0.5, emissive: 0xcc8800, emissiveIntensity: 0.4 });
   for (const a of [0, Math.PI / 2]) {
     const blade = new THREE.Mesh(new THREE.BoxGeometry(9.5, 0.08, 0.45), bladeMat);
     blade.rotation.y = a;
     blade.position.y = 0.6;
     rotor.add(blade);
+    for (const s of [-1, 1]) {
+      const tip = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.09, 0.46), tipMat);
+      tip.position.set(Math.sin(a) * s * 4.55, 0.6, Math.cos(a) * s * 4.55);
+      tip.rotation.y = a;
+      rotor.add(tip);
+    }
   }
-  const disc = new THREE.Mesh(
-    new THREE.CircleGeometry(4.8, 24),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false }),
-  );
+  const discMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.13, side: THREE.DoubleSide, depthWrite: false });
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(4.8, 24), discMat);
   disc.rotation.x = -Math.PI / 2;
   disc.position.y = 0.62;
   rotor.add(disc);
+  const disc2 = new THREE.Mesh(new THREE.CircleGeometry(4.8, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.06, side: THREE.DoubleSide, depthWrite: false }));
+  disc2.rotation.x = -Math.PI / 2;
+  disc2.position.y = 0.45;
+  rotor.add(disc2);
   g.add(rotor);
   g.userData.rotor = rotor;
 
@@ -132,6 +219,7 @@ export function createHelicopter(scene) {
     mesh.position.set(x, y, z);
     mesh.rotation.y = Math.atan2(playerPos.x - x, playerPos.z - z);
     mesh.userData.rotor.rotation.y += dt * 22;
+    if (mesh.userData.tailRotor) mesh.userData.tailRotor.rotation.x += dt * 30;
     aimBeam(x, y, z, playerPos.x, playerPos.z);
     state.dist = Math.hypot(x - playerPos.x, z - playerPos.z);
     return state.dist;
