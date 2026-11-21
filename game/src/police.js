@@ -4,8 +4,9 @@
 // close; escape decays the heat when no cruiser is near. On foot, deputies
 // chase and punch. Sirens wail while any cruiser is in pursuit.
 import * as THREE from 'three';
-import { CITY, TUNING } from './config.js';
+import { CITY, TUNING, nearestRoad } from './config.js';
 import { makeCar, makeCarState, updateCar, syncCarMesh, pushCars } from './vehicles.js';
+import { makeRoadblock } from './heli.js';
 
 export function createPolice(scene, colliders, audio) {
   const cruisers = [];
@@ -14,6 +15,9 @@ export function createPolice(scene, colliders, audio) {
   let decayTimer = 0;
   let bustTimer = 0;
   let sirenOn = false;
+  let nextUnit = 1; // callsign counter: DUST-1, DUST-2, ... never reused
+  // The roadblock: barriers across the road ahead of the player at 4+ stars.
+  const roadblock = { active: false, mesh: null, x: 0, z: 0, heading: 0 };
 
   // ---- Road-graph pursuit (round 3) ----
   // Cruisers steer ALONG ROADS toward the player (BFS over the 7x7 grid
@@ -24,7 +28,11 @@ export function createPolice(scene, colliders, audio) {
   // Office sits on (120,-120), the Motel on (-60,-60)), so nodes and
   // edges touching a landmark collider are impassable and the route goes
   // around them. Generic buildings never block a road: their faces sit
-  // >=6m from a road centreline, past the 2.8m clearance margin.
+  // >=6m from a road centreline, past the 2.8m clearance margin. A cruiser
+  // that has arrived at its goal node does not rebuild a route to the same
+  // node (see the settled check in update) — it drives the final stretch
+  // directly at the player, or it would orbit the node whenever the player
+  // stops more than 25m from it (the direct-aim threshold).
   const GRID = CITY.grid; // [-180,-120,-60,0,60,120,180], pitch 60
   const CLEAR = 2.8; // node/edge clearance past the 2.3m car radius
   function nodeBlocked(x, z) {
@@ -95,7 +103,34 @@ export function createPolice(scene, colliders, audio) {
     const mesh = makeCar(0x1c1c22, { police: true, name: `police-${cruisers.length}` });
     scene.add(mesh);
     const state = makeCarState(120, -100, 0);
-    cruisers.push({ mesh, state, mode: 'chase', stuck: 0, route: null, routeIdx: 0, replanAt: 0, reverseUntil: 0, goalNode: null });
+    cruisers.push({
+      mesh, state, mode: 'chase', stuck: 0, route: null, routeIdx: 0,
+      replanAt: 0, reverseUntil: 0, goalNode: null,
+      callsign: `DUST-${nextUnit++}`,
+    });
+  }
+
+  // Place the roadblock barriers across the road at (x, z), facing the
+  // player's heading. The barriers' long axis is X; a road running
+  // north-south needs them unrotated, an east-west road needs a quarter turn.
+  function placeRoadblock(x, z, heading) {
+    clearRoadblock();
+    const mesh = makeRoadblock();
+    const fx = Math.sin(heading), fz = Math.cos(heading);
+    mesh.rotation.y = Math.abs(fx) > Math.abs(fz) ? Math.PI / 2 : 0;
+    mesh.position.set(x, 0, z);
+    scene.add(mesh);
+    roadblock.active = true;
+    roadblock.mesh = mesh;
+    roadblock.x = x;
+    roadblock.z = z;
+    roadblock.heading = heading;
+  }
+
+  function clearRoadblock() {
+    if (roadblock.mesh) scene.remove(roadblock.mesh);
+    roadblock.active = false;
+    roadblock.mesh = null;
   }
 
   function spawnDeputy(x, z) {
@@ -134,6 +169,31 @@ export function createPolice(scene, colliders, audio) {
       const c = cruisers.pop();
       scene.remove(c.mesh);
     }
+    // Roadblock at 4+ stars: barriers across the road 70 m ahead of the
+    // player, and the farthest cruiser is sent to hold the post. It clears
+    // when the heat drops — the town does not blockade itself for a 1-star
+    // joyride.
+    if (wanted >= 4 && !roadblock.active && cruisers.length > 0) {
+      const h = player.heading || 0;
+      const fx = Math.sin(h), fz = Math.cos(h);
+      let px = player.pos.x + fx * 70, pz = player.pos.z + fz * 70;
+      // Snap onto the road the player is travelling.
+      if (Math.abs(fx) > Math.abs(fz)) pz = nearestRoad(pz);
+      else px = nearestRoad(px);
+      px = Math.max(-170, Math.min(170, px));
+      pz = Math.max(-170, Math.min(170, pz));
+      placeRoadblock(px, pz, h);
+      let far = null, farD = -1;
+      for (const c of cruisers) {
+        const d = Math.hypot(c.state.pos.x - px, c.state.pos.z - pz);
+        if (d > farD) { farD = d; far = c; }
+      }
+      if (far) { far.mode = 'roadblock'; far.route = null; }
+    }
+    if (wanted < 4 && roadblock.active) {
+      clearRoadblock();
+      for (const c of cruisers) c.mode = 'chase';
+    }
     // Deputies only hunt a player on foot at wanted 2+.
     if (wanted >= 2 && !player.inCar && deputies.length < 2) {
       spawnDeputy(player.pos.x + 12, player.pos.z + 8);
@@ -149,19 +209,40 @@ export function createPolice(scene, colliders, audio) {
 
     let nearestDist = Infinity;
     for (const c of cruisers) {
-      const dx = player.pos.x - c.state.pos.x;
-      const dz = player.pos.z - c.state.pos.z;
+      // A roadblock cruiser drives to its post, not to the player — the
+      // BFS route, the aim and the arrival all use the post as the goal.
+      const goalPos = (c.mode === 'roadblock' && roadblock.active)
+        ? { x: roadblock.x, z: roadblock.z } : player.pos;
+      const dx = goalPos.x - c.state.pos.x;
+      const dz = goalPos.z - c.state.pos.z;
       const dist = Math.hypot(dx, dz);
-      nearestDist = Math.min(nearestDist, dist);
-      // Aim: the player directly when close (final ram/bust) or when no
+      // nearestDist tracks the PLAYER for the bust and escape rules, not
+      // the post — a cruiser sitting at its post is not "on" the player.
+      const distPlayer = Math.hypot(player.pos.x - c.state.pos.x, player.pos.z - c.state.pos.z);
+      nearestDist = Math.min(nearestDist, distPlayer);
+      // Aim: the goal directly when close (final ram/bust) or when no
       // route exists; otherwise the next node of the BFS road route.
-      let aimX = player.pos.x, aimZ = player.pos.z, direct = true;
+      let aimX = goalPos.x, aimZ = goalPos.z, direct = true;
       if (dist >= 25) {
         if (!c.route || time >= c.replanAt) {
           c.replanAt = time + 1;
-          const goal = nearestOpenNode(player.pos.x, player.pos.z);
+          const goal = nearestOpenNode(goalPos.x, goalPos.z);
           const goalChanged = !c.goalNode || !goal || goal[0] !== c.goalNode[0] || goal[1] !== c.goalNode[1];
-          if (!c.route || goalChanged) {
+          // Round 4 — settled at the goal node: once the cruiser has ARRIVED
+          // at the goal node, do NOT rebuild a route to the same node. A
+          // rebuilt route from the node to itself is a single node the
+          // cruiser already sits on, so it aims back at its own position
+          // and orbits the node forever — the player at (-60,-74) is 44m
+          // from its nearest open node (-60,-120) while the direct-aim
+          // threshold is 25m, so without this the cruiser never closes the
+          // last stretch (measured: it orbited (-60,-112) at 28-42m for a
+          // full minute). With no route, the aim stays direct at the player
+          // and the cruiser drives the final stretch up the road. The goal
+          // node only changes when the player moves to another node's area,
+          // and then the route rebuilds as before.
+          const atGoalNode = goal && Math.hypot(c.state.pos.x - goal[0], c.state.pos.z - goal[1]) < 12;
+          const settled = c.goalNode && goal && !goalChanged && atGoalNode;
+          if ((!c.route || goalChanged) && !settled) {
             c.goalNode = goal;
             // Route FROM the node the cruiser is already heading to — NOT
             // from the nearest node. Replanning every second from the
@@ -215,10 +296,13 @@ export function createPolice(scene, colliders, audio) {
       // 2.8 accel), so the car never slowed for the turn.
       const turnCap = Math.abs(dh) > 0.4 ? 6 : Math.abs(dh) > 0.15 ? 12 : 38;
       let target = Math.min(targetSpeed, turnCap);
-      // Final approach: ease onto the player instead of blowing past at
+      // Final approach: ease onto the goal instead of blowing past at
       // 18 m/s — a bust needs the cruiser to SIT within 5m for 2s. Gentle
       // (2 m/s at contact) so the ram push stays well under bustSpeed 2.5.
       if (direct) target = Math.min(target, Math.max(2, dist * 0.4));
+      // A roadblock cruiser parks at its post: within 8 m of it, hold still
+      // instead of easing around the point.
+      if (c.mode === 'roadblock' && dist < 8) target = 0;
       let throttle = c.state.speed < target ? 1 : 0;
       let brake = c.state.speed > target + 2;
       // Stuck: grinding a wall while trying to move — reverse off it for
@@ -233,8 +317,10 @@ export function createPolice(scene, colliders, audio) {
       }
       if (time < c.reverseUntil) { throttle = -1; brake = false; }
       updateCar(c.state, { throttle, steer: time < c.reverseUntil ? 0 : steer, brake }, dt, colliders);
-      // Ram: shove the player's car on contact.
-      if (player.carState && dist < c.state.radius + player.carState.radius) {
+      // Ram: shove the player's car on contact (distance to the PLAYER,
+      // not to a roadblock post — a cruiser at its post must not shove a
+      // car 60 m away).
+      if (player.carState && distPlayer < c.state.radius + player.carState.radius) {
         pushCars(c.state, player.carState);
         c.state.speed *= 0.92;
         if (Math.abs(player.carState.speed) < 1) c.state.speed *= 0.9;
@@ -284,16 +370,35 @@ export function createPolice(scene, colliders, audio) {
     return null;
   }
 
+  function getDispatch(playerPos) {
+    // One row per cruiser on the road: callsign, live role, live distance.
+    // The role reads off what the cruiser is actually doing, not a label:
+    // ROADBLOCK at its post, RAMMING on the player's bumper, PURSUIT while
+    // closing, SEARCHING when it has lost the player.
+    const rows = [];
+    for (const c of cruisers) {
+      const d = Math.hypot(c.state.pos.x - playerPos.x, c.state.pos.z - playerPos.z);
+      let role = 'SEARCHING';
+      if (c.mode === 'roadblock') role = 'ROADBLOCK';
+      else if (d < 15) role = 'RAMMING';
+      else if (d < 45) role = 'PURSUIT';
+      rows.push({ callsign: c.callsign, role, dist: Math.round(d) });
+    }
+    return rows;
+  }
+
   function getWanted() { return wanted; }
   function setWanted(n) { wanted = Math.max(0, Math.min(5, n)); decayTimer = 0; }
   function clearAll() {
     for (const c of cruisers.splice(0)) scene.remove(c.mesh);
     for (const d of deputies.splice(0)) scene.remove(d.mesh);
+    clearRoadblock();
     wanted = 0;
     if (sirenOn) { audio.siren(false); sirenOn = false; }
   }
 
   return {
     cruisers, deputies, update, addWanted, getWanted, setWanted, clearAll,
+    getDispatch, placeRoadblock, clearRoadblock, roadblock,
   };
 }

@@ -21,6 +21,21 @@
   #health-bar { height: 10px; background: rgba(255,255,255,0.15); border-radius: 5px; margin: 7px 0 3px; overflow: hidden; }
   #health-fill { height: 100%; width: 100%; background: #7dff5e; border-radius: 5px; transition: width 0.2s; }
   #health-text { font-size: 11px; color: rgba(245,234,216,0.85); }
+  #armour-bar { height: 7px; background: rgba(255,255,255,0.12); border-radius: 4px; margin: 5px 0 3px; overflow: hidden; }
+  #armour-fill { height: 100%; width: 0%; background: #6db3ff; border-radius: 4px; transition: width 0.2s; }
+  #armour-text { font-size: 11px; color: rgba(160,200,255,0.9); }
+  #respect { font-size: 11px; font-weight: 700; color: #ffd23d; margin-top: 6px; letter-spacing: 0.5px; }
+  #district { font-size: 11px; color: rgba(245,234,216,0.85); margin-top: 2px; }
+  #radio { font-size: 11px; color: rgba(245,234,216,0.7); margin-top: 2px; }
+  #dispatch { position: absolute; top: 78px; right: 14px; padding: 8px 12px; min-width: 215px; font-size: 12px; }
+  #dispatch h3 { margin: 0 0 5px; font-size: 11px; letter-spacing: 1.5px; color: #ffd23d; }
+  .dispatch-row { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+  .dispatch-unit { font-weight: 800; color: #fff; }
+  .dispatch-role { color: #ffb08a; font-weight: 700; }
+  .dispatch-dist { color: rgba(245,234,216,0.8); }
+  #weapons { position: absolute; left: 14px; bottom: 52px; padding: 6px 12px; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; }
+  #nitro-bar { height: 6px; background: rgba(255,255,255,0.12); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  #nitro-fill { height: 100%; width: 100%; background: #ff8a3d; border-radius: 3px; }
   #stars { position: absolute; top: 14px; right: 14px; padding: 8px 14px; font-size: 24px; letter-spacing: 4px; color: #8a7a5e; }
   #stars.hot { color: #ffd23d; text-shadow: 0 0 12px rgba(255, 60, 60, 0.8); animation: pulse 0.8s infinite alternate; }
   @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.06); } }
@@ -32,7 +47,7 @@
   #speedo { position: absolute; right: 14px; bottom: 14px; padding: 10px 16px; text-align: right; }
   #speed { font-size: 34px; font-weight: 800; line-height: 1; }
   #speed-unit { font-size: 12px; color: rgba(245,234,216,0.8); }
-  #minimap { position: absolute; right: 14px; bottom: 96px; width: 200px; height: 200px; border-radius: 10px;
+  #minimap { position: absolute; right: 14px; bottom: 96px; width: 200px; height: 200px; border-radius: 50%;
     border: 2px solid rgba(255, 213, 140, 0.5); background: #241a12; }
   #hint { position: absolute; left: 14px; bottom: 14px; font-size: 12px; color: rgba(245,234,216,0.75);
     background: rgba(20,14,8,0.5); padding: 6px 10px; border-radius: 6px; }
@@ -69,6 +84,28 @@
   #over-title.over-busted { color: #6db3ff; }
   #over-title.over-wasted { color: #ff5d5d; }
   .kbd { background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; padding: 1px 6px; font-family: inherit; }
+  /* ---- Garage + stats screens ---- */
+  #garage-items { width: min(620px, 88vw); text-align: left; margin-bottom: 10px; }
+  .garage-row { display: flex; align-items: center; gap: 14px; background: rgba(20,14,8,0.62);
+    border: 1px solid rgba(255,213,140,0.35); border-radius: 10px; padding: 10px 14px; margin: 8px 0; }
+  .garage-info { flex: 1; }
+  .garage-name { font-size: 15px; font-weight: 800; color: #ffd23d; }
+  .garage-desc { font-size: 12.5px; color: rgba(245,234,216,0.85); margin-top: 2px; }
+  .garage-price { font-size: 16px; font-weight: 800; color: #7dff5e; white-space: nowrap; }
+  .garage-buy { font-size: 14px; font-weight: 800; color: #241a12; background: #ffd23d; border: none;
+    border-radius: 8px; padding: 9px 16px; cursor: pointer; white-space: nowrap; }
+  .garage-buy:disabled { background: rgba(255,255,255,0.18); color: rgba(245,234,216,0.55); cursor: default; }
+  #garage-cash { font-size: 20px; font-weight: 800; color: #7dff5e; }
+  #garage-cond { font-size: 13px; color: rgba(245,234,216,0.85); margin-bottom: 8px; }
+  .stats-percent { width: min(520px, 88vw); height: 14px; background: rgba(255,255,255,0.15);
+    border-radius: 7px; overflow: hidden; margin: 6px 0 10px; }
+  .stats-percent-bar { height: 100%; background: #ffd23d; border-radius: 7px; }
+  .stats-line { font-size: 15px; color: rgba(245,234,216,0.92); margin: 8px 0; }
+  .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: min(520px, 88vw); margin: 12px 0; }
+  .stats-grid div { background: rgba(20,14,8,0.62); border: 1px solid rgba(255,213,140,0.35);
+    border-radius: 10px; padding: 12px 8px; }
+  .stats-grid b { display: block; font-size: 22px; color: #ffd23d; }
+  .stats-grid span { font-size: 12px; color: rgba(245,234,216,0.8); }
 </style>
 </head>
 <body>
@@ -81,15 +118,22 @@
     <div id="cash">$50</div>
     <div id="health-bar"><div id="health-fill"></div></div>
     <div id="health-text">100 HP</div>
+    <div id="armour-bar"><div id="armour-fill"></div></div>
+    <div id="armour-text">Armour 0</div>
+    <div id="respect">RESPECT — Nobody · 0</div>
+    <div id="district">Main Street</div>
+    <div id="radio">♪ DUST 98.1</div>
   </div>
   <div id="stars" class="panel">☆☆☆☆☆</div>
+  <div id="dispatch" class="panel hidden"><h3>SHERIFF DISPATCH</h3><div id="dispatch-rows"></div></div>
   <div id="objective" class="panel">
     <div id="obj-title">Find work</div>
     <div id="obj-text">Head to the Rusty Spur Motel job board.</div>
     <div id="timer"></div>
   </div>
   <canvas id="minimap" width="200" height="200"></canvas>
-  <div id="speedo" class="panel"><span id="speed">0</span><br><span id="speed-unit">km/h</span></div>
+  <div id="speedo" class="panel"><span id="speed">0</span><br><span id="speed-unit">km/h</span><div id="nitro-bar" class="hidden"><div id="nitro-fill"></div></div></div>
+  <div id="weapons" class="panel">FISTS · PISTOL 12/12</div>
   <div id="hint"></div>
   <div id="toast"></div>
   <div id="crosshair" class="hidden"></div>
@@ -116,7 +160,30 @@
   <p class="sub">The desert waits. The sheriff does not — well, right now he does.</p>
   <div>
     <button id="btn-resume">Resume</button>
+    <button id="btn-career" class="ghost">Career</button>
     <button id="btn-restart" class="ghost">Restart at the Motel</button>
+  </div>
+  <div class="controls">
+    <span class="kbd">G</span> garage, near Rook's Garage &nbsp;·&nbsp; <span class="kbd">M</span> mute
+  </div>
+</div>
+
+<div id="screen-garage" class="screen hidden">
+  <h2>ROOK'S GARAGE</h2>
+  <p class="sub">Dusthaven Customs — Delia's cousin runs the shop. Cash on hand:</p>
+  <div id="garage-cash">$50</div>
+  <div id="garage-cond">Condition 100% · Armour 0</div>
+  <div id="garage-items"></div>
+  <div><button id="btn-garage-leave">Back to the street</button></div>
+</div>
+
+<div id="screen-stats" class="screen hidden">
+  <h2>CAREER — ROOK</h2>
+  <p class="sub">What Dusthaven knows about you so far.</p>
+  <div id="stats-body"></div>
+  <div>
+    <button id="btn-stats-resume">Back to the street</button>
+    <button id="btn-stats-back" class="ghost">Pause menu</button>
   </div>
 </div>
 

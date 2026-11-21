@@ -1,6 +1,6 @@
 // Dusthaven input: keyboard state + mouse (drag to orbit the camera on foot,
-// click to shoot). Also exposes the shot-mode query (?shot=start|play|action|end)
-// the kit's shots.json uses for deterministic screenshots.
+// click to shoot). Also exposes the shot-mode query (?shot=action|foot|bridge|stats
+// and the older start|play|end) the kit's shots.json uses for deterministic screenshots.
 export function createInput() {
   const keys = new Set();
   const pressed = new Set(); // edge-triggered: one entry per physical press
@@ -20,7 +20,9 @@ export function createInput() {
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   });
   window.addEventListener('keyup', (e) => keys.delete(e.code));
-  window.addEventListener('blur', () => keys.clear());
+  // Blur clears both sets: a key released while the window is unfocused
+  // would otherwise leave a stale edge-triggered press that fires on refocus.
+  window.addEventListener('blur', () => { keys.clear(); pressed.clear(); });
 
   const canvas = document.getElementById('game');
   canvas.addEventListener('mousedown', (e) => {
@@ -68,5 +70,5 @@ export function createInput() {
 export function shotMode() {
   const q = new URLSearchParams(window.location.search);
   const s = q.get('shot');
-  return ['start', 'play', 'action', 'end'].includes(s) ? s : null;
+  return ['start', 'play', 'action', 'foot', 'bridge', 'stats', 'end'].includes(s) ? s : null;
 }

@@ -6,6 +6,7 @@
 // from the sun + hemisphere + bounce rig in world.js.
 import * as THREE from 'three';
 import { CITY, PALETTE, LANDMARKS } from './config.js';
+import { SHOPS, SHOP_ROW_Z } from './districts.js';
 
 // Deterministic RNG so the city is identical on every load.
 function mulberry32(seed) {
@@ -18,12 +19,15 @@ function mulberry32(seed) {
   };
 }
 
-function windowTexture() {
-  // Adobe wall with a grid of windows; a few windows glow warm (lit rooms).
+function windowTexture(base = '#c98d5f') {
+  // Wall with a grid of windows; a few windows glow warm (lit rooms).
+  // `base` tints the wall: adobe for generic buildings, teal for the diner,
+  // blue-grey for the garage, grey for the sheriff's office — one texture
+  // function, one lit-window language across the whole town.
   const c = document.createElement('canvas');
   c.width = 256; c.height = 256;
   const g = c.getContext('2d');
-  g.fillStyle = '#c98d5f';
+  g.fillStyle = base;
   g.fillRect(0, 0, 256, 256);
   // Dirt mask: grime near the bottom, sun-bleach near the top.
   const grad = g.createLinearGradient(0, 0, 0, 256);
@@ -98,11 +102,22 @@ export function createCity(scene) {
       const cx = (grid[i] + grid[i + 1]) / 2;
       const cz = (grid[j] + grid[j + 1]) / 2;
       if (landmarkCells.has(`${cx},${cz}`)) continue;
+      // Round 4: the wash band and the two reserved blocks stay clear.
+      // The wash (z 79..101) is the arroyo corridor — no building stands in
+      // a riverbed. The hotel block (30,-30) and the shop block (-30,-90)
+      // are built by hand below, so the generic scatter leaves them alone.
+      if (cz > CITY.washZ - CITY.washHalf - 14 && cz < CITY.washZ + CITY.washHalf + 14) continue;
+      if (cx === 30 && cz === -30) continue;
+      if (cx === -30 && cz === -90) continue;
       const n = 1 + Math.floor(rng() * 3);
       for (let k = 0; k < n; k++) {
         const w = 12 + rng() * 16;
         const d = 12 + rng() * 16;
-        const h = 7 + rng() * 14;
+        // Height variety (round 4): most buildings stay 7–16 m, a fifth rise
+        // to 16–24 m, and one in ten is a 24–32 m tower — the old flat
+        // 7–21 m range is what made the skyline read as one brown slab.
+        const hr = rng();
+        const h = hr < 0.7 ? 7 + rng() * 9 : hr < 0.9 ? 16 + rng() * 8 : 24 + rng() * 8;
         const x = cx + (rng() - 0.5) * (CITY.block - w - 4);
         const z = cz + (rng() - 0.5) * (CITY.block - d - 4);
         placements.push({ x, z, w, d, h });
@@ -151,8 +166,22 @@ export function createCity(scene) {
     const m = new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.05, ...mat });
     return m;
   };
-  function blockBuilding(cx, cz, w, d, h, mat, label) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), hero(mat));
+  // Landmark walls carry the same window grid as the generic buildings, so
+  // no hero facade is a flat coloured slab (the round-3 complaint was the
+  // motel's windowless brown south face). The texture goes on the four
+  // sides only — the roof stays plain — and the window base tints per
+  // building. `winBase` null keeps the old flat material.
+  function blockBuilding(cx, cz, w, d, h, mat, label, winBase) {
+    let material = hero(mat);
+    if (winBase) {
+      const tex = windowTexture(winBase);
+      const side = new THREE.MeshStandardMaterial({
+        map: tex, roughness: 0.85, metalness: 0.0,
+        emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.12,
+      });
+      material = [side, side, material, material, side, side];
+    }
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
     mesh.position.set(cx, h / 2, cz);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -163,8 +192,8 @@ export function createCity(scene) {
   }
 
   // Rusty Spur Motel: two wings + neon sign on a pole.
-  blockBuilding(-60, -60, 34, 12, 8, { color: 0xb97a4e }, 'motel-main');
-  blockBuilding(-60, -44, 12, 12, 8, { color: 0xa86f45 }, 'motel-wing');
+  blockBuilding(-60, -60, 34, 12, 8, { color: 0xb97a4e }, 'motel-main', '#b97a4e');
+  blockBuilding(-60, -44, 12, 12, 8, { color: 0xa86f45 }, 'motel-wing', '#a86f45');
   const motelSign = makeSign('RUSTY SPUR', '#ff5da2', '#241a20', 14, 3.5);
   // Angled 45° to face south-east, toward the corner where the x=-60 road
   // meets the z=-60 road — a real motel sign on a corner reads from both
@@ -182,9 +211,14 @@ export function createCity(scene) {
   signPole.position.set(-66, 4.5, -52);
   signPole.castShadow = true;
   group.add(signPole);
+  // VACANCY neon on the motel's south face — the flat brown wall the
+  // round-3 review called out now reads as a motel at a glance.
+  const vacancySign = makeSign('VACANCY', '#7dff5e', '#1c2b12', 6, 1.5);
+  vacancySign.position.set(-48, 4.5, -53.9);
+  group.add(vacancySign);
 
   // Dusthaven Diner: low wide building + teal sign.
-  blockBuilding(-60, 60, 26, 16, 6, { color: 0x2e7f7a }, 'diner');
+  blockBuilding(-60, 60, 26, 16, 6, { color: 0x2e7f7a }, 'diner', '#2e7f7a');
   const dinerSign = makeSign('DINER', '#3ae0ff', '#12262a', 10, 2.5);
   dinerSign.position.set(-60, 7.5, 52);
   group.add(dinerSign);
@@ -213,7 +247,7 @@ export function createCity(scene) {
   group.add(gasSign);
 
   // Rook's Garage: big shed with a wide door.
-  blockBuilding(60, 60, 30, 18, 9, { color: 0x4a6b8a }, 'garage');
+  blockBuilding(60, 60, 30, 18, 9, { color: 0x4a6b8a }, 'garage', '#4a6b8a');
   const door = new THREE.Mesh(new THREE.PlaneGeometry(10, 6), hero({ color: 0x2b2b2e, roughness: 0.6, metalness: 0.5 }));
   door.position.set(60, 3, 50.8);
   group.add(door);
@@ -233,10 +267,116 @@ export function createCity(scene) {
   colliders.push({ x0: -122.5, z0: -134.5, x1: -117.5, z1: -129.5 });
 
   // Sheriff's Office.
-  blockBuilding(120, -120, 20, 14, 7, { color: 0x8a8a7a }, 'sheriff');
+  blockBuilding(120, -120, 20, 14, 7, { color: 0x8a8a7a }, 'sheriff', '#8a8a7a');
   const sheriffSign = makeSign("SHERIFF", '#e8e2d2', '#2b2b2e', 9, 2.2);
   sheriffSign.position.set(120, 8.5, -112.5);
   group.add(sheriffSign);
+
+  // Palms Hotel (round 4): the town's one tall building — 26 m, eight
+  // storeys of lit windows, a rooftop sign. It anchors the Drive-In Row
+  // skyline and gives the chase shots a vertical element the old flat town
+  // never had. Its block (30,-30) is reserved from the generic scatter.
+  blockBuilding(30, -30, 24, 20, 26, { color: 0xd9a06a }, 'palms-hotel', '#d9a06a');
+  const hotelSign = makeSign('PALMS HOTEL', '#ffd23d', '#3a2410', 16, 3);
+  hotelSign.position.set(30, 24, -19.8);
+  group.add(hotelSign);
+
+  // Shop row (round 4): four lit storefronts on the north side of Motel
+  // Row, facing the road. Each unit has an awning, a glowing sign and a
+  // door; the row sits 3 m behind the sidewalk, so pedestrians stroll past
+  // lit windows instead of blank walls. Its block (-30,-90) is reserved
+  // from the generic scatter.
+  for (const shop of SHOPS) {
+    const sx = shop.x, sz = SHOP_ROW_Z;
+    const shopTex = windowTexture('#c98d5f');
+    const shopMat = new THREE.MeshStandardMaterial({
+      map: shopTex, roughness: 0.85, metalness: 0.0,
+      emissive: 0xffffff, emissiveMap: shopTex, emissiveIntensity: 0.2,
+    });
+    const unit = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 6), shopMat);
+    unit.position.set(sx, 2.5, sz);
+    unit.castShadow = true;
+    unit.receiveShadow = true;
+    unit.name = `shop:${shop.name}`;
+    group.add(unit);
+    const awning = new THREE.Mesh(new THREE.BoxGeometry(10.4, 0.25, 2.2),
+      hero({ color: 0xc94f3d, roughness: 0.7 }));
+    awning.position.set(sx, 3.4, sz + 3.8);
+    awning.rotation.x = 0.35;
+    awning.castShadow = true;
+    group.add(awning);
+    const door = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 3),
+      hero({ color: 0x2b2b2e, roughness: 0.6, metalness: 0.5 }));
+    door.position.set(sx - 3, 1.5, sz + 3.05);
+    group.add(door);
+    const sSign = makeSign(shop.name, shop.fg, shop.bg, 8, 2);
+    sSign.position.set(sx, 4.6, sz + 3.05);
+    group.add(sSign);
+    colliders.push({ x0: sx - 5, z0: sz - 3, x1: sx + 5, z1: sz + 3 });
+  }
+
+  // Wash Bridge (round 4): the one bridge in town, carrying Main Street
+  // (x=0) over the dry wash at z=90. The deck is flat at road level so cars
+  // drive it on the same physics as the road — the bridge reads through its
+  // rust-red trusses, parapets and signs, and the wash below is painted
+  // into the ground texture (see world.js). Pedestrians cross on the
+  // walkway strips inside the parapets.
+  const bZ = CITY.washZ, bX = CITY.bridgeX, bH = CITY.bridgeHalf;
+  const deck = new THREE.Mesh(
+    new THREE.BoxGeometry(bH * 2, 0.1, CITY.washHalf * 2 + 4),
+    new THREE.MeshStandardMaterial({ color: 0x3a3a40, roughness: 0.9, metalness: 0.0 }),
+  );
+  deck.position.set(bX, -0.03, bZ);
+  deck.receiveShadow = true;
+  deck.name = 'wash-bridge-deck';
+  group.add(deck);
+  // Centre line, so the road reads as continuing over the bridge.
+  const deckLine = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, CITY.washHalf * 2 + 4),
+    hero({ color: 0xb8a44a, roughness: 0.8 }));
+  deckLine.position.set(bX, 0.03, bZ);
+  group.add(deckLine);
+  const trussMat = hero({ color: 0x8a3d2b, metalness: 0.5, roughness: 0.5 });
+  const parapetMat = hero({ color: 0x9a8a76, roughness: 0.9 });
+  for (const s of [-1, 1]) {
+    const tx = bX + s * (bH - 0.4);
+    const topChord = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, CITY.washHalf * 2 + 4), trussMat);
+    topChord.position.set(tx, 2.6, bZ);
+    topChord.castShadow = true;
+    group.add(topChord);
+    const botChord = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, CITY.washHalf * 2 + 4), trussMat);
+    botChord.position.set(tx, 0.5, bZ);
+    group.add(botChord);
+    for (let k = 0; k < 5; k++) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.25, 2.2, 0.25), trussMat);
+      post.position.set(tx, 1.55, bZ - CITY.washHalf - 2 + k * ((CITY.washHalf * 2 + 4) / 4));
+      post.castShadow = true;
+      group.add(post);
+    }
+    // Low concrete parapet the cars brush against; it is also the collider.
+    const parapet = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.9, CITY.washHalf * 2 + 4), parapetMat);
+    parapet.position.set(bX + s * (bH - 0.2), 0.45, bZ);
+    parapet.castShadow = true;
+    group.add(parapet);
+    colliders.push({
+      x0: bX + s * (bH - 0.2) - 0.2, z0: bZ - CITY.washHalf - 2,
+      x1: bX + s * (bH - 0.2) + 0.2, z1: bZ + CITY.washHalf + 2,
+    });
+  }
+  const bridgeSignS = makeSign('WASH BRIDGE', '#ffd23d', '#3a2410', 7, 1.6);
+  bridgeSignS.rotation.y = Math.PI; // faces south, at drivers heading north
+  bridgeSignS.position.set(bX, 3.4, bZ - CITY.washHalf - 2.5);
+  group.add(bridgeSignS);
+  const bridgeSignN = makeSign('WASH BRIDGE', '#ffd23d', '#3a2410', 7, 1.6);
+  bridgeSignN.position.set(bX, 3.4, bZ + CITY.washHalf + 2.5);
+  group.add(bridgeSignN);
+  // Sign posts: the boards stand on the roadside, they do not float.
+  const postMat = hero({ color: 0x3a3a40, metalness: 0.6, roughness: 0.4 });
+  for (const [px, pz] of [[-3, bZ - CITY.washHalf - 2.5], [3, bZ - CITY.washHalf - 2.5], [-3, bZ + CITY.washHalf + 2.5], [3, bZ + CITY.washHalf + 2.5]]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.6, 6), postMat);
+    post.position.set(px, 1.3, pz);
+    post.castShadow = true;
+    group.add(post);
+  }
 
   // Water tower: four legs + a tank.
   const legMat = hero({ color: 0x6b4a2f, metalness: 0.5, roughness: 0.5 });
@@ -308,9 +448,11 @@ export function createCity(scene) {
   rocks.castShadow = true;
   group.add(rocks);
 
-  // Telephone poles along the main avenue (x = 0).
+  // Telephone poles along the main avenue (x = 0). No pole at z = 90: the
+  // Wash Bridge stands there, and a pole on the deck would read as a mistake.
   const poleMat = hero({ color: 0x5a4028, roughness: 1 });
   for (let z = -180; z <= 180; z += 30) {
+    if (z === CITY.washZ) continue;
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 9, 6), poleMat);
     pole.position.set(5.5, 4.5, z);
     pole.castShadow = true;

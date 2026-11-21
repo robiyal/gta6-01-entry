@@ -5,6 +5,7 @@
 // traffic and the mission beacon.
 import * as THREE from 'three';
 import { CITY, LANDMARKS } from './config.js';
+import { DISTRICTS, STREETS } from './districts.js';
 
 export function createCameraRig(camera) {
   const rig = {
@@ -105,6 +106,36 @@ export function createMinimap(canvas) {
       const [x3, y3] = toMap(-CITY.half - 20, line);
       const [x4, y4] = toMap(CITY.half + 20, line);
       ctx.beginPath(); ctx.moveTo(x3, y3); ctx.lineTo(x4, y4); ctx.stroke();
+    }
+    // The wash (round 4): a darker band across the minimap at z = 90, so the
+    // bridge crossing reads before the player ever drives there.
+    const [wx0, wy0] = toMap(-CITY.half - 20, CITY.washZ - CITY.washHalf);
+    const [wx1, wy1] = toMap(CITY.half + 20, CITY.washZ + CITY.washHalf);
+    ctx.fillStyle = 'rgba(140,100,55,0.55)';
+    ctx.fillRect(wx0, wy0, wx1 - wx0, wy1 - wy0);
+    // District names (round 4): the town reads as named places, not sand.
+    ctx.font = 'bold 8px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255,240,210,0.75)';
+    for (const d of DISTRICTS) {
+      const [x, y] = toMap((d.x0 + d.x1) / 2, (d.z0 + d.z1) / 2);
+      ctx.fillText(d.name.toUpperCase(), x, y);
+    }
+    // Street names along the main roads.
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = '7px system-ui, sans-serif';
+    for (const s of STREETS) {
+      if (s.axis === 'x') {
+        const [x, y] = toMap(s.at + 3, -120);
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Math.PI / 2);
+        ctx.fillText(s.name, 0, 0);
+        ctx.restore();
+      } else {
+        const [x, y] = toMap(-120, s.at - 3);
+        ctx.fillText(s.name, x, y);
+      }
     }
     // Landmarks.
     ctx.font = 'bold 9px system-ui, sans-serif';

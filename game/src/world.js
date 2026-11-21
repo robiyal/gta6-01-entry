@@ -51,6 +51,31 @@ function makeGroundTexture() {
       g.fillRect(toPx(v), toPx(line) - 0.5, 3.5 * m, 1);
     }
   }
+  // The dry wash (round 4): a sandy arroyo band across town at z = 90.
+  // Painted after the asphalt so it cuts the north-south roads as fords —
+  // only the bridge (a 3D deck in city.js) carries Main Street over it.
+  // Darker sand, rocky banks, speckled bed.
+  const washY0 = toPx(CITY.washZ - CITY.washHalf);
+  const washY1 = toPx(CITY.washZ + CITY.washHalf);
+  g.fillStyle = '#a87f4e';
+  g.fillRect(0, washY0, S, washY1 - washY0);
+  g.fillStyle = 'rgba(120,85,45,0.5)';
+  g.fillRect(0, washY0, S, 3 * m);
+  g.fillRect(0, washY1 - 3 * m, S, 3 * m);
+  for (let i = 0; i < 500; i++) {
+    const x = Math.random() * S;
+    const y = washY0 + Math.random() * (washY1 - washY0);
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(90,65,35,0.4)' : 'rgba(210,170,110,0.35)';
+    g.fillRect(x, y, 2 + Math.random() * 6, 2 + Math.random() * 4);
+  }
+  // Dry bushes caught in the wash bed: dark olive dots, a few per stretch.
+  for (let i = 0; i < 90; i++) {
+    const x = Math.random() * S;
+    const y = washY0 + 2 * m + Math.random() * (washY1 - washY0 - 4 * m);
+    const r = 2 + Math.random() * 4;
+    g.fillStyle = 'rgba(90,95,50,0.55)';
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
   // Crosswalks at the central intersections.
   g.fillStyle = 'rgba(230,230,220,0.85)';
   for (const a of [-60, 0, 60]) for (const b of [-60, 0, 60]) {

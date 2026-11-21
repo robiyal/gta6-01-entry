@@ -94,18 +94,25 @@ export function makeCar(color, opts = {}) {
 }
 
 // Arcade car state: position on the ground plane, heading, speed.
+// `condition` is the car's health (100 new): hard crashes and police rams
+// wear it down, the garage restores it, and the HUD shows it next to the
+// speed. Only the player's driven car is ever displayed.
 export function makeCarState(x, z, heading) {
   return {
     pos: new THREE.Vector3(x, 0, z),
     heading, speed: 0, steer: 0,
     radius: 2.3,
+    condition: 100,
   };
 }
 
 // One fixed-step arcade update. `drive` = {throttle -1..1, steer -1..1, brake bool}.
 // Steering authority fades with speed so the car stays controllable at 40 m/s.
-export function updateCar(state, drive, dt, colliders) {
+// `maxSpeed` overrides the tuning cap (engine tunes / nitro); callers that do
+// not pass it get TUNING.carMaxSpeed.
+export function updateCar(state, drive, dt, colliders, maxSpeed) {
   const t = TUNING;
+  const topSpeed = maxSpeed || t.carMaxSpeed;
   const targetSteer = drive.steer * t.carTurn * Math.min(1, 6 / (Math.abs(state.speed) + 3));
   state.steer += (targetSteer - state.steer) * Math.min(1, dt * 8);
   state.heading += state.steer * dt * Math.sign(state.speed || 1) * (Math.abs(state.speed) > 0.3 ? 1 : 0);
@@ -120,7 +127,7 @@ export function updateCar(state, drive, dt, colliders) {
   // Drag + rolling resistance.
   state.speed -= state.speed * t.carDrag * dt * 0.4;
   if (Math.abs(state.speed) < 0.05 && drive.throttle === 0) state.speed = 0;
-  state.speed = Math.max(-12, Math.min(t.carMaxSpeed, state.speed));
+  state.speed = Math.max(-12, Math.min(topSpeed, state.speed));
 
   const prev = state.pos.clone();
   state.pos.x += Math.sin(state.heading) * state.speed * dt;

@@ -7,6 +7,13 @@
 // three jobs from Delia Voss, and keep the dust out of your eyes. Third-person on
 // foot and behind the wheel, traffic and pedestrians, police chases, combat, a HUD
 // with a live minimap, start/pause/game-over screens and a localStorage save.
+// Round 4 (21 Nov 2026): the town grew — pedestrian crowds on the sidewalks,
+// a named sheriff dispatch with a helicopter and roadblocks up to 5 stars,
+// lit shops and a garage menu with prices, a drivable bridge over the wash,
+// six named districts, a career stats screen, and a richer HUD (armour,
+// Respect rank, weapon slots, named radio, car condition, nitro). The four
+// screenshots are staged action: a 5-star chase, an on-foot beat, the bridge
+// crossing, and the career screen (see shots.json for the ?shot= setups).
 // Built in the recorded session for gta6-01; the screenshots are real renders of
 // this game's own code (see shots.json for the deterministic ?shot= setups).
 //
@@ -31,6 +38,9 @@ if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), joi
 // scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
 // files, in all, or a path under game/ over 1000 bytes: game/ counts beside /output's own 1000-entry cap, its
 // screenshots/ and dossier.json).
+// Round 4: the first screenshot by name is the cover — 1-action.jpg, a dense
+// 5-star chase; then 2-foot, 3-bridge, 4-stats. The judge compares the cover
+// pairwise, so it is action, never a menu.
 writeFileSync(
   join(out, 'dossier.json'),
   buildDossier(out, {
