@@ -133,19 +133,57 @@ export function createPolice(scene, colliders, audio) {
     roadblock.mesh = null;
   }
 
+  // Sheriff uniform (revision, round 4): a deputy must read as LAW at a
+  // glance, not as another pedestrian — pedestrians wear varied coloured
+  // shirts and brown hats, so the deputy gets a tan sheriff's shirt, dark
+  // trousers and belt, a cream campaign hat with a dark band, and a gold
+  // star badge on the chest. Slightly taller than a ped.
+  function starShape(points, outer, inner) {
+    const s = new THREE.Shape();
+    for (let i = 0; i < points * 2; i++) {
+      const r = i % 2 === 0 ? outer : inner;
+      const a = (i / (points * 2)) * Math.PI * 2 - Math.PI / 2;
+      const px = Math.cos(a) * r, py = Math.sin(a) * r;
+      if (i === 0) s.moveTo(px, py); else s.lineTo(px, py);
+    }
+    s.closePath();
+    return s;
+  }
+
   function spawnDeputy(x, z) {
     const g = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2e, roughness: 0.85 });
+    const shirtMat = new THREE.MeshStandardMaterial({ color: 0xc2a878, roughness: 0.85 });
+    const darkMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2e, roughness: 0.85 });
     const skinMat = new THREE.MeshStandardMaterial({ color: 0xc98d6a, roughness: 0.7 });
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.95, 4, 8), bodyMat);
-    body.position.y = 1.05;
-    body.castShadow = true;
+    for (const lx of [-0.15, 0.15]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.7, 8), darkMat);
+      leg.position.set(lx, 0.35, 0);
+      leg.castShadow = true;
+      g.add(leg);
+    }
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.55, 4, 8), shirtMat);
+    torso.position.y = 1.15;
+    torso.castShadow = true;
+    g.add(torso);
+    const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.09, 10), darkMat);
+    belt.position.y = 0.82;
+    g.add(belt);
+    const star = new THREE.Mesh(
+      new THREE.ShapeGeometry(starShape(5, 0.13, 0.055)),
+      new THREE.MeshBasicMaterial({ color: 0xffc53d }),
+    );
+    star.position.set(-0.12, 1.38, 0.35);
+    g.add(star);
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 10, 8), skinMat);
-    head.position.y = 1.9;
-    const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.32, 0.16, 10),
-      new THREE.MeshStandardMaterial({ color: 0x1c1c22, roughness: 0.7 }));
-    hat.position.y = 2.1;
-    g.add(body, head, hat);
+    head.position.y = 1.95;
+    head.castShadow = true;
+    const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.14, 10),
+      new THREE.MeshStandardMaterial({ color: 0xd8c8a8, roughness: 0.8 }));
+    hat.position.y = 2.16;
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.31, 0.05, 10), darkMat);
+    band.position.y = 2.11;
+    g.add(head, hat, band);
+    g.scale.setScalar(1.06);
     g.position.set(x, 0, z);
     scene.add(g);
     deputies.push({

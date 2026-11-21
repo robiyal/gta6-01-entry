@@ -664,13 +664,22 @@ function applyShotMode(shot) {
     });
     // Roadblock barriers across the road ahead, held by the third cruiser.
     police.placeRoadblock(28, -60, Math.PI / 2);
-    // Helicopter low over the road ahead (round 4 fix: the first staging put
-    // it at 38m, ~49° above the camera's view axis — out of frame. At 8m
-    // over the road centreline, 35m ahead, it reads top-centre of the frame
-    // with its beam running back down the road to the player car).
-    heli.place(15, 8, -60, -20, -60);
-    // Traffic on the road around the chase.
-    stageCar(0, -14, -58, Math.PI / 2);
+    // Helicopter low and close over the road ahead (revision, round 4:
+    // the first staging put it at 38 m (out of frame), the round-4 fix at
+    // (15, 8, -60) parked it directly behind the avenue's telephone pole
+    // at x=5.5, so the pole bisected it and it read as a traffic light.
+    // At (-5, 7, -65) it is 15 m ahead, 7 m up and 5 m north of the
+    // centreline: the body sits clear left of the pole, the rotor reads
+    // big across the top of the frame, and the beam runs back down the
+    // road to the player car.
+    heli.place(-5, 7, -65, -20, -60);
+    // Traffic on the road around the chase. Car 0 rides the ONCOMING lane
+    // heading west (revision: the old spot (-14,-58) sat in the chase lane
+    // directly ahead of the player, so the green civilian hid the lead
+    // cruiser behind it — the frame read as one green car, no police).
+    // With the lane clear, the white-and-black lead cruiser is the car
+    // directly ahead of the player, light bar showing.
+    stageCar(0, -14, -62, -Math.PI / 2);
     stageCar(1, -48, -62, -Math.PI / 2);
     stageCar(2, 44, -58, Math.PI / 2);
     stageCar(3, -2, -20, 0);
@@ -698,7 +707,7 @@ function applyShotMode(shot) {
         { callsign: 'DUST-1', role: 'RAMMING', dist: 12 },
         { callsign: 'DUST-2', role: 'PURSUIT', dist: 12 },
         { callsign: 'DUST-3', role: 'ROADBLOCK', dist: 48 },
-        { callsign: 'AIR-1', role: 'SPOTLIGHT', dist: 35 },
+        { callsign: 'AIR-1', role: 'SPOTLIGHT', dist: 16 },
       ],
       speedKmh: 94, inCar: true,
       objectiveTitle: 'First Job — deliver',
@@ -713,36 +722,60 @@ function applyShotMode(shot) {
     // synced by hand here — the frozen branch never runs player.update(),
     // so without this Rook stays at his boot spot and the frame shows an
     // empty street (first version of this shot proved it).
-    player.state.pos.set(-30, 0, -64.5);
+    // Revision, round 4 (second pass): Rook stands at (-24,-64.5), 4 m
+    // east of the old spot. The DUSTY PAWN sign sits 4 m east of Rook's
+    // old line, so orbiting the camera around him could not move it: the
+    // sign is 10 m out and 8 m wide, and the parallax nearly cancels the
+    // yaw (the first attempt, yaw +0.26, moved the sign RIGHT, and its
+    // "AWN" stayed under the dispatch panel). Moving Rook east puts the
+    // sign 2 m WEST of his line instead, so it lands left of centre,
+    // its final "N" ~250 px clear of the panel. Rook stays centred — the
+    // rig looks at him, not along the yaw.
+    player.state.pos.set(-24, 0, -64.5);
     player.state.heading = Math.PI; // faces the shops (north, -z)
-    player.mesh.position.set(-30, 0, -64.5);
+    player.mesh.position.set(-24, 0, -64.5);
     player.mesh.rotation.y = Math.PI;
     player.mesh.visible = true;
     rig.mode = 'foot';
     rig.yaw = Math.PI;
-    rig.pitch = 0.18; // flatter than the live 0.32: less shadowed near-ground
+    rig.pitch = 0.14; // flatter than the live 0.32: less shadowed near-ground
     setState('playing');
     police.setWanted(2);
     police.update(0, { pos: player.state.pos, speed: 0, inCar: false, carState: null, heading: Math.PI }, 0);
     if (police.deputies[0]) {
       const dep = police.deputies[0];
-      dep.pos.set(-28, 0, -67);
-      dep.heading = Math.atan2(-30 - -28, -64.5 - -67);
-      dep.mesh.position.set(-28, 0, -67);
+      // Revision (second pass): the deputy stands 2.5 m west and 2.5 m in
+      // front of Rook — close enough to read as a face-off, far enough to
+      // clear Rook in the frame, facing him squarely with the star badge
+      // toward the camera. The old spot (-28,-67) sat inside the crowd.
+      dep.pos.set(-26.5, 0, -67);
+      dep.heading = Math.atan2(-24 - -26.5, -64.5 - -67);
+      dep.mesh.position.set(-26.5, 0, -67);
       dep.mesh.rotation.y = dep.heading;
     }
     // Crowd along the north sidewalk, strolling past the shop fronts.
+    // Bubble around the face-off: any ped whose slot falls in the
+    // clearing (x -30..-22) steps 8 m east, so Rook and the deputy stand
+    // alone in front of the pawn shop instead of inside the crowd.
     traffic.peds.forEach((ped, i) => {
       const x = -48 + (i % 8) * 4.9;
+      const bx = (x > -30 && x < -22) ? x + 8 : x;
       const z = -66 + (i % 3) * 0.8;
-      ped.pos.set(x, 0, z);
+      ped.pos.set(bx, 0, z);
       ped.heading = i % 2 === 0 ? Math.PI / 2 : -Math.PI / 2;
-      ped.mesh.position.set(x, 0, z);
+      ped.mesh.position.set(bx, 0, z);
       ped.mesh.rotation.y = ped.heading;
     });
     stageCar(0, -14, -58, Math.PI / 2);
     stageCar(1, -48, -62, -Math.PI / 2);
     world.storm = 0;
+    // Fill light for this shot only: the foreground road sits in the pawn
+    // shop's shadow (low sun from the north-west), so the bottom third
+    // rendered as a black band. A stronger hemisphere + bounce lifts the
+    // shadowed asphalt to a readable dark grey without touching the
+    // golden-hour key — the other shots keep their own light.
+    world.hemi.intensity = 2.0;
+    world.bounce.intensity = 1.6;
     game.shotFreeze = true;
     hud = {
       health: 100, armour: 0, cash: game.cash, wanted: 2,
@@ -750,7 +783,7 @@ function applyShotMode(shot) {
       district: 'Main Street', radio: 'DUST 98.1 — Desert Gold',
       ammo: 12, condition: null,
       nitroOwned: false, nitroPct: 100,
-      dispatch: [{ callsign: 'DUST-1', role: 'SEARCHING', dist: 3 }],
+      dispatch: [{ callsign: 'DUST-1', role: 'SEARCHING', dist: 4 }],
       speedKmh: 0, inCar: false,
       objectiveTitle: 'Main Street — on foot',
       objectiveText: 'The sheriff is watching. Keep walking or run.',
